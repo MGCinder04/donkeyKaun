@@ -1,0 +1,43 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Import via Render dashboard: New > Blueprint, point it at this repo.
+#
+# Client and server are two separate services on purpose: the static site never spins
+# down (loads instantly, always), while the free API/Socket.io service still spins down
+# after inactivity — the client shows its own loading screen while that wakes up instead
+# of Render's default cold-start page.
+#
+# After the first blueprint sync, set the "sync: false" secrets below in the dashboard
+# (they're intentionally left out of this file so nothing sensitive ends up in git).
+
+services:
+  - type: web
+    name: donkey-kaun-api
+    env: node
+    plan: free
+    rootDir: .
+    buildCommand: npm install && npm run build:server
+    startCommand: npm run start --workspace server
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLIENT_ORIGIN
+        sync: false # set to the deployed client URL, e.g. https://donkey-kaun.onrender.com
+      - key: SITE_PASSCODE
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+
+  - type: web
+    name: donkey-kaun
+    env: static
+    rootDir: .
+    buildCommand: npm install && npm run build:client
+    staticPublishPath: client/dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false # set to the deployed API URL, e.g. https://donkey-kaun-api.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
