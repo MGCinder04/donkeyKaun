@@ -61,14 +61,22 @@ export function onRoomState(cb: (room: PublicRoom) => void): () => void {
 
 export function onKicked(cb: (code: string) => void): () => void {
   const socket = getSocket();
-  const handler = (payload: { code: string }) => cb(payload.code);
+  const handler = (payload: { code: string }) => {
+    // Otherwise a later socket reconnect (network blip, tab wake) would silently
+    // re-announce room:join from activeMembership and undo the kick.
+    if (activeMembership?.code === payload.code) activeMembership = null;
+    cb(payload.code);
+  };
   socket.on("room:kicked", handler);
   return () => socket.off("room:kicked", handler);
 }
 
 export function onRoomExited(cb: (code: string) => void): () => void {
   const socket = getSocket();
-  const handler = (payload: { code: string }) => cb(payload.code);
+  const handler = (payload: { code: string }) => {
+    if (activeMembership?.code === payload.code) activeMembership = null;
+    cb(payload.code);
+  };
   socket.on("room:exited", handler);
   return () => socket.off("room:exited", handler);
 }

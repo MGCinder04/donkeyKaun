@@ -3,7 +3,13 @@ import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import { createServer } from "node:http";
 import { Server } from "socket.io";
-import { isGateEnabled, sessionHandler, socketAuthMiddleware, unlockHandler } from "./security/passcodeGate.js";
+import {
+  isGateEnabled,
+  sessionHandler,
+  socketAuthMiddleware,
+  sweepStaleAttempts,
+  unlockHandler,
+} from "./security/passcodeGate.js";
 import { registerRoomHandlers } from "./rooms/socketHandlers.js";
 import { sweepStaleRooms } from "./rooms/store.js";
 
@@ -29,6 +35,13 @@ function cors(req: Request, res: Response, next: NextFunction): void {
     return;
   }
   next();
+}
+
+if (!CLIENT_ORIGIN) {
+  console.warn(
+    "[security] CLIENT_ORIGIN is not set — Socket.IO CORS falls back to allowing " +
+      "any origin. Set CLIENT_ORIGIN in production so only the real client can connect.",
+  );
 }
 
 const httpServer = createServer(app);
@@ -62,6 +75,7 @@ io.on("connection", (socket) => {
 });
 
 setInterval(sweepStaleRooms, 60_000);
+setInterval(sweepStaleAttempts, 60_000);
 
 httpServer.listen(PORT, () => {
   console.log(`donkey-kaun server listening on port ${PORT}`);

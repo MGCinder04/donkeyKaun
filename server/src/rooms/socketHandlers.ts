@@ -32,6 +32,7 @@ interface RoomPayload {
   targetDeviceId?: unknown;
   bid?: unknown;
   card?: unknown;
+  data?: unknown;
 }
 
 function noop() {}
@@ -224,6 +225,26 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     }
     ack({ ok: true, value: null });
     io.to(code).emit("room:exited", { code });
+  });
+
+  // WebRTC signaling relay for voice chat: purely a pass-through between two players
+  // already confirmed to be in the same room. The server never looks at (or could make
+  // sense of) the SDP/ICE payload itself — offer, answer, and ICE candidate messages all
+  // flow through this one event, distinguished by their own `type` field on the client.
+  socket.on("voice:signal", (payload: RoomPayload) => {
+    if (
+      typeof payload?.code !== "string" ||
+      typeof payload?.deviceId !== "string" ||
+      typeof payload?.targetDeviceId !== "string"
+    ) {
+      return;
+    }
+    const room = findRoom(payload.code);
+    if (!room) return;
+    const sender = room.players.find((p) => p.deviceId === payload.deviceId);
+    const target = room.players.find((p) => p.deviceId === payload.targetDeviceId);
+    if (!sender || !target?.socketId) return;
+    io.to(target.socketId).emit("voice:signal", { deviceId: payload.deviceId, data: payload.data });
   });
 
   socket.on("disconnect", () => {

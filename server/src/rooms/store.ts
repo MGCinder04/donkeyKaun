@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import type { Card } from "../game/cards.js";
 import { continueGame, isTrickComplete, newGame, placeBid, playCard, resolvePendingTrick, startGame } from "../game/engine.js";
 import { toPublicGameState } from "../game/publicState.js";
@@ -19,7 +20,7 @@ export type RoomResult<T> = { ok: true; value: T } | { ok: false; error: RoomErr
 function generateCode(): string {
   let code: string;
   do {
-    code = Array.from({ length: CODE_LENGTH }, () => CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)]).join("");
+    code = Array.from({ length: CODE_LENGTH }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join("");
   } while (rooms.has(code));
   return code;
 }
@@ -55,7 +56,14 @@ export function createRoom(
 
   const code = generateCode();
   const player: Player = { deviceId, name, avatar, socketId, joinedAt: Date.now(), disconnectedAt: null };
-  const room: Room = { code, status: "lobby", players: [player], createdAt: Date.now(), game: null };
+  const room: Room = {
+    code,
+    status: "lobby",
+    players: [player],
+    createdAt: Date.now(),
+    game: null,
+    kickedDeviceIds: new Set(),
+  };
   rooms.set(code, room);
   return { ok: true, value: room };
 }
@@ -73,6 +81,7 @@ export function joinRoom(
 
   const room = findRoom(rawCode);
   if (!room) return { ok: false, error: "not_found" };
+  if (room.kickedDeviceIds.has(deviceId)) return { ok: false, error: "kicked" };
 
   const existing = room.players.find((p) => p.deviceId === deviceId);
   if (existing) {
@@ -210,9 +219,18 @@ export function kickPlayer(code: string, hostDeviceId: string, targetDeviceId: s
   if (!target) return { ok: false, error: "not_found" };
 
   const removedSocketId = target.socketId;
-  room.players = room.players.filter((p) => p.deviceId !== targetDeviceId);
-  if (room.players.length === 0) {
-    rooms.delete(room.code);
+  room.kickedDeviceIds.add(targetDeviceId);
+  if (room.status === "playing") {
+    // Can't splice mid-game — GameState.seatOrder was captured at startGame and the
+    // engine still expects this deviceId to occupy its seat. Mark them permanently
+    // disconnected instead; kickedDeviceIds blocks them from ever rejoining.
+    target.socketId = null;
+    target.disconnectedAt = Date.now();
+  } else {
+    room.players = room.players.filter((p) => p.deviceId !== targetDeviceId);
+    if (room.players.length === 0) {
+      rooms.delete(room.code);
+    }
   }
   return { ok: true, value: { room, removedSocketId } };
 }
@@ -220,6 +238,16 @@ export function kickPlayer(code: string, hostDeviceId: string, targetDeviceId: s
 export function leaveRoom(code: string, deviceId: string): Room | null {
   const room = findRoom(code);
   if (!room) return null;
+  if (room.status === "playing") {
+    // Same reasoning as kickPlayer: don't splice out of a live GameState.seatOrder.
+    // Leaving mid-game is just treated as a disconnect — they can still rejoin.
+    const player = room.players.find((p) => p.deviceId === deviceId);
+    if (player) {
+      player.socketId = null;
+      player.disconnectedAt = Date.now();
+    }
+    return room;
+  }
   room.players = room.players.filter((p) => p.deviceId !== deviceId);
   if (room.players.length === 0) {
     rooms.delete(room.code);
@@ -254,7 +282,11 @@ export function toPublicRoom(room: Room): PublicRoom {
   return { code: room.code, status: room.status, players, game: room.game ? toPublicGameState(room.game) : null };
 }
 
-/** Periodic sweep: drop long-disconnected players from lobbies (frees the seat) and empty rooms. */
+/** Periodic sweep: drop long-disconnected players from lobbies (frees the seat), and
+ *  delete rooms that are either empty or (for in-progress games, where players are never
+ *  individually removed — that would break seat order/dealing) entirely abandoned, i.e.
+ *  every player has been disconnected past the grace period. Without this, a mid-game
+ *  room nobody ever returns to would sit in memory forever. */
 export function sweepStaleRooms(): void {
   const now = Date.now();
   for (const room of rooms.values()) {
@@ -263,7 +295,10 @@ export function sweepStaleRooms(): void {
         (p) => p.socketId !== null || p.disconnectedAt === null || now - p.disconnectedAt < DISCONNECT_GRACE_MS,
       );
     }
-    if (room.players.length === 0) {
+    const abandoned = room.players.every(
+      (p) => p.socketId === null && p.disconnectedAt !== null && now - p.disconnectedAt >= DISCONNECT_GRACE_MS,
+    );
+    if (room.players.length === 0 || abandoned) {
       rooms.delete(room.code);
     }
   }

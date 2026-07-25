@@ -1,10 +1,16 @@
 import type { Request, Response } from "express";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 10;
 
 const attempts = new Map<string, { count: number; resetAt: number }>();
+
+// Generated once per process (not hardcoded) — if this were a fixed string, anyone who
+// has read this source could compute a valid unlock token themselves without ever
+// knowing SITE_PASSCODE, entirely bypassing the gate whenever an operator sets
+// SITE_PASSCODE but forgets the separate SESSION_SECRET dashboard field.
+const EPHEMERAL_SECRET = randomBytes(32).toString("hex");
 
 function sign(secret: string, value: string): string {
   return createHmac("sha256", secret).update(value).digest("hex");
@@ -28,6 +34,15 @@ function isRateLimited(ip: string): boolean {
   return entry.count > RATE_LIMIT_MAX_ATTEMPTS;
 }
 
+/** Periodic sweep: drop expired rate-limit entries so `attempts` doesn't grow forever
+ *  (every distinct IP that has ever hit /api/unlock would otherwise stay in memory). */
+export function sweepStaleAttempts(): void {
+  const now = Date.now();
+  for (const [ip, entry] of attempts) {
+    if (now > entry.resetAt) attempts.delete(ip);
+  }
+}
+
 export function isGateEnabled(): boolean {
   return Boolean(process.env.SITE_PASSCODE);
 }
@@ -36,10 +51,10 @@ function sessionSecret(): string {
   const secret = process.env.SESSION_SECRET;
   if (secret) return secret;
   console.warn(
-    "[security] SESSION_SECRET is not set — using an ephemeral secret. " +
+    "[security] SESSION_SECRET is not set — using a random per-process secret. " +
       "Everyone will be logged out on every server restart. Set SESSION_SECRET in production.",
   );
-  return "dev-only-ephemeral-secret";
+  return EPHEMERAL_SECRET;
 }
 
 function isValidToken(token: string | undefined): boolean {

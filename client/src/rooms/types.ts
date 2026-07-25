@@ -75,6 +75,7 @@ export type RoomErrorCode =
   | "invalid_bid"
   | "dealer_restricted"
   | "not_your_card"
-  | "must_follow_suit";
+  | "must_follow_suit"
+  | "kicked";
 
 export type Envelope<T> = { ok: true; value: T } | { ok: false; error: RoomErrorCode };

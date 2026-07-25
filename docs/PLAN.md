@@ -129,9 +129,12 @@ Each milestone ends with a checklist below and a demo for live testing before me
 - [x] Minimal functional UI wired up to actually play (bidding buttons, legal/illegal
       card highlighting, live scoreboard, game-end screen) — real animation and the
       circular table layout are still M3
-- [ ] Known gap: voluntary leave/host-kick mid-game are still allowed (by design — only
-      the auto-disconnect sweep is lobby-only), but the engine has no auto-forfeit for
-      it yet, so a departed player's seat just stalls everyone else's turn
+- [x] Fixed in M5: voluntary leave/host-kick mid-game no longer splice the player out of
+      `GameState.seatOrder` (that desynced the engine and permanently stalled the game) —
+      both are now treated as a disconnect, so the seat shows "reconnecting…" and the
+      player can rejoin normally. A mid-game kick additionally blocks that deviceId from
+      rejoining. Still no auto-forfeit/bot-takeover if a player never comes back — that
+      remains a known limitation, acceptable for a private friends-game v1.
 
 ### M3 — Game UI & Animation ✅
 - [x] Circular table layout (desktop + mobile) — ego-centric, you're always at 6 o'clock
@@ -144,21 +147,31 @@ Each milestone ends with a checklist below and a demo for live testing before me
 - [x] Reconnect handling — greyed/pulsing avatar + "reconnecting…" at the table,
       verified to clear automatically once the player's socket comes back
 
-### M4 — Voice Chat
-- [ ] WebRTC mesh signaling over Socket.io
-- [ ] Mute/unmute UI, speaking indicators
-- [ ] STUN/TURN fallback for NAT traversal
+### M4 — Voice Chat ✅
+- [x] WebRTC mesh signaling over Socket.io (pure relay, server never parses SDP/ICE)
+- [x] Mute/unmute UI, speaking indicators (per-seat pulsing ring, Web Audio analyser)
+- [x] STUN only — no TURN. **Known limitation:** voice can fail to connect for players
+      behind strict/symmetric NATs (no budget for hosted TURN credentials). Everything
+      else (game, chat-free play) is unaffected if voice fails.
 
-### M5 — Polish
-- [ ] Full mobile responsiveness pass
-- [ ] Disconnect/rejoin edge cases
-- [ ] Sound effects
+### M5 — Polish ✅
+- [x] Full mobile responsiveness pass (390px viewport tested; fixed two overlap bugs —
+      voice control button vs. lobby seat, scoresheet button vs. profile badge)
+- [x] Disconnect/rejoin edge cases (see M2 note above; also: abandoned in-progress rooms
+      now get garbage-collected after the grace period instead of leaking forever;
+      "reconnecting…" banner added for the local player, not just other seats)
+- [x] Sound effects (synthesized Web Audio tones — card play, trick win, your turn, round
+      end, game end — plus a mute toggle next to the theme toggle, persisted like theme)
 
 ### M6 — Deploy Hardening
-- [ ] Secrets audit (nothing sensitive in the repo history)
-- [ ] Render production deploy
-- [ ] Load test with 6 concurrent connections
-- [ ] Final security pass
+- [x] Secrets audit (nothing sensitive in the repo; `.env*` gitignored, `render.yaml`
+      keeps real values out via `sync: false`)
+- [ ] Render production deploy — not done by design; user is testing manually before
+      merging `work` → `main`
+- [x] Load test with 6 concurrent connections
+- [x] Final security pass — fixed a real passcode-gate bypass (hardcoded fallback secret
+      was derivable from source if `SESSION_SECRET` was ever left unset), an unbounded
+      rate-limiter memory leak, and switched room-code generation to a CSPRNG
 
 ## 6. Git workflow (for you to run day-to-day)
 

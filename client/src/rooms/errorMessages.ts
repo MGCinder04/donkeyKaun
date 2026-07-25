@@ -14,4 +14,5 @@ export const ROOM_ERROR_MESSAGES: Record<RoomErrorCode, string> = {
   dealer_restricted: "That bid would make the total match the cards dealt — not allowed for the dealer.",
   not_your_card: "You don't have that card.",
   must_follow_suit: "You have to follow suit if you can.",
+  kicked: "You were removed from this room and can't rejoin.",
 };

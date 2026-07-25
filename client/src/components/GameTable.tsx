@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AvatarThumb } from "./AvatarThumb";
 import { Button } from "./Button";
@@ -6,6 +6,13 @@ import { ScoreSheetModal } from "./ScoreSheetModal";
 import { gameSeatPosition, pileSlotPosition } from "../rooms/gameSeatLayout";
 import { useDealAnimation, useRoundRecap, useTrickAnimation } from "../rooms/gameAnimations";
 import { SUIT_COLOR, SUIT_SYMBOL, cardKey, cardLabel } from "../lib/cardDisplay";
+import {
+  playCardSound,
+  playGameEndSound,
+  playRoundEndSound,
+  playTrickWinSound,
+  playYourTurnSound,
+} from "../sound/soundEngine";
 import type { Card, PublicGameState, PublicPlayer } from "../rooms/types";
 
 interface GameTableProps {
@@ -20,6 +27,7 @@ interface GameTableProps {
   onNewGame: () => void;
   onContinue: () => void;
   onExit: () => void;
+  speakingDeviceIds?: Set<string>;
 }
 
 export function GameTable({
@@ -34,6 +42,7 @@ export function GameTable({
   onNewGame,
   onContinue,
   onExit,
+  speakingDeviceIds,
 }: GameTableProps) {
   const [showScoreSheet, setShowScoreSheet] = useState(false);
   const nameFor = (id: string) => players.find((p) => p.deviceId === id)?.name ?? "?";
@@ -60,6 +69,47 @@ export function GameTable({
   const isMyBidTurn = game.phase === "bidding" && game.bidTurnDeviceId === myDeviceId;
   const isMyPlayTurn = game.phase === "trick" && game.turnDeviceId === myDeviceId;
 
+  const prevTrickLenRef = useRef(displayTrick.length);
+  useEffect(() => {
+    if (displayTrick.length > prevTrickLenRef.current) {
+      playCardSound();
+    }
+    prevTrickLenRef.current = displayTrick.length;
+  }, [displayTrick.length]);
+
+  const prevSweepingRef = useRef(sweeping);
+  useEffect(() => {
+    if (sweeping && !prevSweepingRef.current) {
+      playTrickWinSound();
+    }
+    prevSweepingRef.current = sweeping;
+  }, [sweeping]);
+
+  const isMyTurn = isMyBidTurn || isMyPlayTurn;
+  const prevMyTurnRef = useRef(isMyTurn);
+  useEffect(() => {
+    if (isMyTurn && !prevMyTurnRef.current) {
+      playYourTurnSound();
+    }
+    prevMyTurnRef.current = isMyTurn;
+  }, [isMyTurn]);
+
+  const prevRoundSummaryRef = useRef(roundSummary);
+  useEffect(() => {
+    if (roundSummary && roundSummary !== prevRoundSummaryRef.current && game.phase !== "game-end") {
+      playRoundEndSound();
+    }
+    prevRoundSummaryRef.current = roundSummary;
+  }, [roundSummary, game.phase]);
+
+  const prevPhaseRef = useRef(game.phase);
+  useEffect(() => {
+    if (game.phase === "game-end" && prevPhaseRef.current !== "game-end") {
+      playGameEndSound();
+    }
+    prevPhaseRef.current = game.phase;
+  }, [game.phase]);
+
   const maxBid = game.cardsThisRound + 1;
   let forbiddenBid: number | null = null;
   if (isMyBidTurn && game.seatOrder[game.dealerSeat] === myDeviceId) {
@@ -69,6 +119,15 @@ export function GameTable({
 
   return (
     <section className="mx-auto max-w-2xl px-4 pb-16 text-center">
+      <button
+        type="button"
+        onClick={() => setShowScoreSheet(true)}
+        className="fixed left-4 top-4 z-40 rounded-full px-3 py-1.5 text-xs font-semibold"
+        style={{ border: "1px solid var(--hairline)", color: "var(--ink-dim)", background: "var(--ground-raised)" }}
+      >
+        Scoresheet
+      </button>
+
       {roundSummary && (
         <AnimatePresence mode="wait">
           {recapVisible ? (
@@ -194,14 +253,6 @@ export function GameTable({
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={() => setShowScoreSheet(true)}
-          className="absolute right-0 top-0 rounded-full px-3 py-1.5 text-xs font-semibold"
-          style={{ border: "1px solid var(--hairline)", color: "var(--ink-dim)", background: "var(--ground-raised)" }}
-        >
-          Scoresheet
-        </button>
 
         {game.seatOrder.map((id, seatIndex) => {
           const position = gameSeatPosition(seatIndex, mySeatIndex, total);
@@ -230,6 +281,12 @@ export function GameTable({
                   <span
                     className="absolute inset-0 rounded-full"
                     style={{ boxShadow: "0 0 0 3px var(--gold-bright)" }}
+                  />
+                )}
+                {speakingDeviceIds?.has(id) && (
+                  <span
+                    className="absolute inset-0 animate-pulse rounded-full"
+                    style={{ boxShadow: "0 0 0 3px rgba(237, 231, 214, 0.75)" }}
                   />
                 )}
                 {id === game.seatOrder[game.dealerSeat] && (

@@ -8,9 +8,10 @@ interface SeatProps {
   isSelf: boolean;
   onClickSelf?: () => void;
   onKick?: () => void;
+  speaking?: boolean;
 }
 
-export function Seat({ player, position, isSelf, onClickSelf, onKick }: SeatProps) {
+export function Seat({ player, position, isSelf, onClickSelf, onKick, speaking }: SeatProps) {
   const style = { top: position.top, left: position.left, transform: "translate(-50%, -50%)" };
 
   if (!player) {
@@ -37,6 +38,12 @@ export function Seat({ player, position, isSelf, onClickSelf, onKick }: SeatProp
           size={46}
           className={player.connected ? "" : "opacity-40 grayscale"}
         />
+        {speaking && (
+          <span
+            className="absolute inset-0 animate-pulse rounded-full"
+            style={{ boxShadow: "0 0 0 3px rgba(237, 231, 214, 0.75)" }}
+          />
+        )}
         {player.isHost && (
           <span
             className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full text-[10px]"

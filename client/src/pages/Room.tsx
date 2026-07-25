@@ -4,6 +4,8 @@ import QRCode from "qrcode";
 import { Button } from "../components/Button";
 import { Seat } from "../components/Seat";
 import { GameTable } from "../components/GameTable";
+import { VoiceControl } from "../components/VoiceControl";
+import { useVoiceChat } from "../voice/useVoiceChat";
 import { useIdentity, hasCompleteProfile } from "../identity/useIdentity";
 import {
   continueGame,
@@ -22,6 +24,7 @@ import {
 } from "../rooms/roomClient";
 import { seatPosition } from "../rooms/seatLayout";
 import { ROOM_ERROR_MESSAGES } from "../rooms/errorMessages";
+import { useConnectionStatus } from "../rooms/useConnectionStatus";
 import type { Card, PublicRoom } from "../rooms/types";
 
 const SEAT_COUNT = 6;
@@ -45,6 +48,7 @@ export function Room() {
   const [hand, setHand] = useState<Card[]>([]);
   const [legalCards, setLegalCards] = useState<Card[]>([]);
   const joinedRef = useRef(false);
+  const connected = useConnectionStatus();
 
   useEffect(() => {
     if (!hasCompleteProfile(identity)) {
@@ -87,6 +91,10 @@ export function Room() {
       setQrDataUrl,
     );
   }, [inviteUrl]);
+
+  const peerDeviceIds =
+    room?.players.filter((p) => p.connected && p.deviceId !== identity.deviceId).map((p) => p.deviceId) ?? [];
+  const voiceState = useVoiceChat(roomCode, identity.deviceId, peerDeviceIds);
 
   function handleCopy() {
     navigator.clipboard.writeText(inviteUrl).then(() => {
@@ -176,6 +184,14 @@ export function Room() {
 
   return (
     <section className="mx-auto max-w-3xl px-6 pt-16 pb-16">
+      {!connected && (
+        <div
+          className="fixed inset-x-0 bottom-0 z-[60] py-1.5 text-center text-xs font-semibold"
+          style={{ background: "var(--brick)", color: "var(--ground)" }}
+        >
+          Reconnecting…
+        </div>
+      )}
       <div className="mb-10 text-center">
         <p
           className="mb-2 text-xs font-semibold uppercase"
@@ -187,6 +203,8 @@ export function Room() {
           {room.players.length} of {SEAT_COUNT} players
         </h2>
       </div>
+
+      <VoiceControl state={voiceState} />
 
       {room.status !== "playing" && (
         <>
@@ -208,6 +226,7 @@ export function Room() {
                   onKick={
                     player && !isSelf && isHost ? () => handleKick(player.deviceId, player.name) : undefined
                   }
+                  speaking={player ? voiceState.speakingDeviceIds.has(player.deviceId) : false}
                 />
               );
             })}
@@ -251,6 +270,7 @@ export function Room() {
           onNewGame={() => newGame(roomCode, identity.deviceId)}
           onContinue={() => continueGame(roomCode, identity.deviceId)}
           onExit={() => exitGame(roomCode, identity.deviceId)}
+          speakingDeviceIds={voiceState.speakingDeviceIds}
         />
       ) : isHost ? (
         <div className="text-center">

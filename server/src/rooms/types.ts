@@ -25,6 +25,9 @@ export interface Room {
   players: Player[];
   createdAt: number;
   game: GameState | null;
+  /** deviceIds the host has kicked — blocks rejoin even though a mid-game kick doesn't
+   *  splice the player out of `players` (that would desync `GameState.seatOrder`). */
+  kickedDeviceIds: Set<string>;
 }
 
 export interface PublicPlayer {
@@ -55,4 +58,5 @@ export type RoomErrorCode =
   | "invalid_bid"
   | "dealer_restricted"
   | "not_your_card"
-  | "must_follow_suit";
+  | "must_follow_suit"
+  | "kicked";
