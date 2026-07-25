@@ -3,6 +3,7 @@ import {
   createRoom,
   findRoom,
   joinRoom,
+  kickPlayer,
   leaveRoom,
   markSocketDisconnected,
   startRoom,
@@ -19,6 +20,7 @@ interface RoomPayload {
   deviceId?: unknown;
   name?: unknown;
   avatar?: unknown;
+  targetDeviceId?: unknown;
 }
 
 function noop() {}
@@ -85,6 +87,29 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       return;
     }
     ack({ ok: true, value: null });
+    broadcastRoom(io, payload.code);
+  });
+
+  socket.on("room:kick", (payload: RoomPayload, ack: Ack<null> = noop) => {
+    if (
+      typeof payload?.code !== "string" ||
+      typeof payload?.deviceId !== "string" ||
+      typeof payload?.targetDeviceId !== "string"
+    ) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    const result = kickPlayer(payload.code, payload.deviceId, payload.targetDeviceId);
+    if (!result.ok) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+    ack({ ok: true, value: null });
+    const { removedSocketId } = result.value;
+    if (removedSocketId) {
+      io.to(removedSocketId).emit("room:kicked", { code: payload.code });
+      io.sockets.sockets.get(removedSocketId)?.leave(payload.code);
+    }
     broadcastRoom(io, payload.code);
   });
 

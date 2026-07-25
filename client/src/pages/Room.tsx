@@ -4,15 +4,15 @@ import QRCode from "qrcode";
 import { Button } from "../components/Button";
 import { Seat } from "../components/Seat";
 import { useIdentity, hasCompleteProfile } from "../identity/useIdentity";
-import { joinRoom, leaveRoom, onRoomState, startRoom } from "../rooms/roomClient";
+import { joinRoom, kickPlayer, leaveRoom, onKicked, onRoomState, startRoom } from "../rooms/roomClient";
 import { seatPosition } from "../rooms/seatLayout";
 import { ROOM_ERROR_MESSAGES } from "../rooms/errorMessages";
 import type { PublicRoom } from "../rooms/types";
 
 const SEAT_COUNT = 6;
-const MIN_TO_START = 5;
+const MIN_TO_START = 2;
 
-type ViewState = "joining" | "joined" | "error";
+type ViewState = "joining" | "joined" | "error" | "kicked";
 
 export function Room() {
   const navigate = useNavigate();
@@ -52,6 +52,10 @@ export function Room() {
     if (incoming.code === roomCode) setRoom(incoming);
   }), [roomCode]);
 
+  useEffect(() => onKicked((kickedCode) => {
+    if (kickedCode === roomCode) setView("kicked");
+  }), [roomCode]);
+
   useEffect(() => {
     QRCode.toDataURL(inviteUrl, { margin: 1, width: 176, color: { dark: "#17281f", light: "#f4eedf" } }).then(
       setQrDataUrl,
@@ -74,6 +78,11 @@ export function Room() {
     }
   }
 
+  async function handleKick(targetDeviceId: string, targetName: string) {
+    if (!window.confirm(`Remove ${targetName} from the room?`)) return;
+    await kickPlayer(roomCode, identity.deviceId, targetDeviceId);
+  }
+
   function handleLeave() {
     leaveRoom(roomCode, identity.deviceId);
     navigate("/");
@@ -83,6 +92,22 @@ export function Room() {
     return (
       <section className="mx-auto max-w-md px-6 pt-24 pb-16 text-center">
         <p style={{ color: "var(--ink-dim)" }}>Joining room {roomCode}…</p>
+      </section>
+    );
+  }
+
+  if (view === "kicked") {
+    return (
+      <section className="mx-auto max-w-md px-6 pt-24 pb-16 text-center">
+        <h2 className="text-2xl font-bold sm:text-3xl">Removed from the room</h2>
+        <p className="mt-3" style={{ color: "var(--ink-dim)" }}>
+          The host removed you from this room.
+        </p>
+        <div className="mt-8 flex justify-center gap-4">
+          <Button variant="ghost" onClick={() => navigate("/")}>
+            Back home
+          </Button>
+        </div>
       </section>
     );
   }
@@ -136,6 +161,9 @@ export function Room() {
               position={seatPosition(i, SEAT_COUNT)}
               isSelf={isSelf}
               onClickSelf={isSelf ? () => navigate("/setup") : undefined}
+              onKick={
+                player && !isSelf && isHost ? () => handleKick(player.deviceId, player.name) : undefined
+              }
             />
           );
         })}
@@ -175,7 +203,7 @@ export function Room() {
           </Button>
           {!canStart && (
             <p className="mt-2 text-sm" style={{ color: "var(--ink-faint)" }}>
-              Need 5 or 6 players to start.
+              Need at least {MIN_TO_START} players to start.
             </p>
           )}
         </div>

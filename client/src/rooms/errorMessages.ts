@@ -6,5 +6,5 @@ export const ROOM_ERROR_MESSAGES: Record<RoomErrorCode, string> = {
   in_progress: "That game has already started.",
   invalid: "Enter a valid room code.",
   not_host: "Only the host can start the game.",
-  cant_start: "Need 5 or 6 players to start.",
+  cant_start: "Need at least 2 players to start.",
 };

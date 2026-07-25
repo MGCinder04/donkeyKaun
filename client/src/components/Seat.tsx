@@ -7,9 +7,10 @@ interface SeatProps {
   position: SeatPosition;
   isSelf: boolean;
   onClickSelf?: () => void;
+  onKick?: () => void;
 }
 
-export function Seat({ player, position, isSelf, onClickSelf }: SeatProps) {
+export function Seat({ player, position, isSelf, onClickSelf, onKick }: SeatProps) {
   const style = { top: position.top, left: position.left, transform: "translate(-50%, -50%)" };
 
   if (!player) {
@@ -44,6 +45,21 @@ export function Seat({ player, position, isSelf, onClickSelf }: SeatProps) {
           >
             ★
           </span>
+        )}
+        {onKick && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onKick();
+            }}
+            aria-label={`Remove ${player.name} from the room`}
+            title="Remove player"
+            className="absolute -top-1 -left-1 flex h-4 w-4 items-center justify-center rounded-full text-[10px] leading-none"
+            style={{ background: "var(--brick)", color: "var(--ink)" }}
+          >
+            ✕
+          </button>
         )}
       </div>
       <span

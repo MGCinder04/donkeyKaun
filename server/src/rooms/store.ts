@@ -1,7 +1,9 @@
 import type { AvatarChoice, Player, PublicPlayer, PublicRoom, Room, RoomErrorCode } from "./types.js";
 
 export const MAX_PLAYERS = 6;
-export const MIN_PLAYERS_TO_START = 5;
+// The game itself calls for 5 or 6 (that's what the scoring/dealing math assumes), but
+// the host can choose to start smaller — e.g. for a test run or a casual few-player game.
+export const MIN_PLAYERS_TO_START = 2;
 const NAME_MAX_LEN = 20;
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no I/O/0/1 — avoids visual ambiguity
 const CODE_LENGTH = 5;
@@ -116,6 +118,30 @@ export function startRoom(code: string, deviceId: string): RoomResult<Room> {
   }
   room.status = "playing";
   return { ok: true, value: room };
+}
+
+export interface KickResult {
+  room: Room;
+  removedSocketId: string | null;
+}
+
+export function kickPlayer(code: string, hostDeviceId: string, targetDeviceId: string): RoomResult<KickResult> {
+  const room = findRoom(code);
+  if (!room) return { ok: false, error: "not_found" };
+
+  const host = toPublicRoom(room).players.find((p) => p.isHost);
+  if (!host || host.deviceId !== hostDeviceId) return { ok: false, error: "not_host" };
+  if (targetDeviceId === hostDeviceId) return { ok: false, error: "invalid" };
+
+  const target = room.players.find((p) => p.deviceId === targetDeviceId);
+  if (!target) return { ok: false, error: "not_found" };
+
+  const removedSocketId = target.socketId;
+  room.players = room.players.filter((p) => p.deviceId !== targetDeviceId);
+  if (room.players.length === 0) {
+    rooms.delete(room.code);
+  }
+  return { ok: true, value: { room, removedSocketId } };
 }
 
 export function leaveRoom(code: string, deviceId: string): Room | null {
