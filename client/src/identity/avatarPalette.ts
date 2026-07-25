@@ -10,25 +10,53 @@ export const DICEBEAR_STYLE_KEYS = [
   "thumbs",
 ];
 
-const PEOPLE_SEEDS = ["Amara", "Kiran", "Zoya", "Devan", "Leela", "Farid"];
+const MALE_SEEDS = [
+  "Dev", "Aarav", "Rohan", "Karan", "Vikram", "Sameer", "Ishaan", "Nikhil", "Arjun", "Rahul",
+];
+
+const FEMALE_SEEDS = [
+  "Amara", "Zoya", "Leela", "Priya", "Anaya", "Kavya", "Meera", "Sana", "Riya", "Naina",
+];
 
 const ANIMAL_EMOJI = [
   "🦊", "🐼", "🦁", "🐨", "🐯", "🦉", "🐻", "🐺", "🐸", "🐵",
   "🐶", "🐱", "🐷", "🐰", "🦆", "🐢", "🐘", "🦋", "🐹", "🦔",
+  "🦓", "🦒", "🐴", "🐮", "🐔", "🐧", "🦅", "🦩", "🐙", "🐬",
+  "🐳", "🦎",
 ];
+
+const MISC_EMOJI = [
+  "🤖", "👽", "🎃", "👻", "🧙", "🦸", "🦹", "🧛", "🥷", "🧑‍🚀",
+  "🕵️", "🤡", "👑", "🐉", "🦄", "💀", "🧞", "🧚", "🧜‍♀️", "⚽",
+  "🎩", "🕶️", "🎭", "🔥",
+];
+
+export type AvatarCategory = "male" | "female" | "animal" | "misc";
 
 export interface CatalogEntry {
   id: string;
   kind: "dicebear" | "animal";
+  category: AvatarCategory;
   styleKey?: string;
   seed?: string;
   emoji?: string;
 }
 
-export const PEOPLE_CATALOG: CatalogEntry[] = DICEBEAR_STYLE_KEYS.flatMap((styleKey) =>
-  PEOPLE_SEEDS.map((seed) => ({
-    id: `${styleKey}-${seed}`,
+export const MALE_CATALOG: CatalogEntry[] = DICEBEAR_STYLE_KEYS.flatMap((styleKey) =>
+  MALE_SEEDS.map((seed) => ({
+    id: `${styleKey}-m-${seed}`,
     kind: "dicebear" as const,
+    category: "male" as const,
+    styleKey,
+    seed,
+  })),
+);
+
+export const FEMALE_CATALOG: CatalogEntry[] = DICEBEAR_STYLE_KEYS.flatMap((styleKey) =>
+  FEMALE_SEEDS.map((seed) => ({
+    id: `${styleKey}-f-${seed}`,
+    kind: "dicebear" as const,
+    category: "female" as const,
     styleKey,
     seed,
   })),
@@ -37,10 +65,23 @@ export const PEOPLE_CATALOG: CatalogEntry[] = DICEBEAR_STYLE_KEYS.flatMap((style
 export const ANIMAL_CATALOG: CatalogEntry[] = ANIMAL_EMOJI.map((emoji, i) => ({
   id: `animal-${i}`,
   kind: "animal" as const,
+  category: "animal" as const,
   emoji,
 }));
 
-export const AVATAR_CATALOG: CatalogEntry[] = [...PEOPLE_CATALOG, ...ANIMAL_CATALOG];
+export const MISC_CATALOG: CatalogEntry[] = MISC_EMOJI.map((emoji, i) => ({
+  id: `misc-${i}`,
+  kind: "animal" as const,
+  category: "misc" as const,
+  emoji,
+}));
+
+export const AVATAR_CATALOG: CatalogEntry[] = [
+  ...MALE_CATALOG,
+  ...FEMALE_CATALOG,
+  ...ANIMAL_CATALOG,
+  ...MISC_CATALOG,
+];
 
 export interface ColorOption {
   key: string;

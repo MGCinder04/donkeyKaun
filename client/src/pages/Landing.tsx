@@ -19,7 +19,7 @@ export function Landing() {
           className="mb-4 text-xs font-semibold uppercase"
           style={{ color: "var(--gold)", letterSpacing: "0.16em" }}
         >
-          A family card game, online
+          🃏 Gupta Khaandaan's very own
         </p>
         <h1 className="text-5xl font-bold leading-[0.98] tracking-tight sm:text-6xl">
           Donkey
@@ -29,12 +29,11 @@ export function Landing() {
           </em>
         </h1>
         <p className="mt-6 max-w-[40ch] leading-relaxed" style={{ color: "var(--ink-dim)" }}>
-          Deal the cards, call your bid, and find out who's carrying the donkey home. Built
-          for five or six players, anywhere in the world.
+          Deal the cards, call your bid, and find out who's the biggest donkey of all. 🫏
         </p>
         <div className="mt-9 flex flex-wrap gap-4">
           <Button variant="primary" onClick={() => go("create")}>
-            Create a Room
+            🎉 Create a Room
           </Button>
           <Button variant="ghost" onClick={() => go("join")}>
             Join with a Code

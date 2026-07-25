@@ -1,20 +1,25 @@
 import { useState } from "react";
 import { AVATAR_CATALOG, COLOR_PALETTE } from "../identity/avatarPalette";
 import { AvatarImage } from "./AvatarImage";
-import type { AvatarSelection } from "../identity/avatarPalette";
+import type { AvatarCategory, AvatarSelection } from "../identity/avatarPalette";
 
 interface AvatarPickerProps {
   value: AvatarSelection | null;
   onChange: (choice: AvatarSelection) => void;
 }
 
+const CATEGORY_TABS: Array<{ key: AvatarCategory; label: string }> = [
+  { key: "male", label: "Male" },
+  { key: "female", label: "Female" },
+  { key: "animal", label: "Animal" },
+  { key: "misc", label: "Misc" },
+];
+
 export function AvatarPicker({ value, onChange }: AvatarPickerProps) {
-  const [tab, setTab] = useState<"people" | "animals">("people");
+  const [tab, setTab] = useState<AvatarCategory>("male");
   const selected = value ?? { catalogId: AVATAR_CATALOG[0].id, colorKey: COLOR_PALETTE[0].key };
 
-  const tiles = AVATAR_CATALOG.filter((entry) =>
-    tab === "people" ? entry.kind === "dicebear" : entry.kind === "animal",
-  );
+  const tiles = AVATAR_CATALOG.filter((entry) => entry.category === tab);
 
   function selectCatalog(catalogId: string) {
     onChange({ catalogId, colorKey: selected.colorKey });
@@ -46,29 +51,21 @@ export function AvatarPicker({ value, onChange }: AvatarPickerProps) {
       </div>
 
       <div>
-        <div className="mb-3 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setTab("people")}
-            className="rounded-full px-4 py-1.5 text-sm font-semibold transition-colors"
-            style={{
-              background: tab === "people" ? "var(--gold)" : "var(--ground-raised-2)",
-              color: tab === "people" ? "#1a1206" : "var(--ink-dim)",
-            }}
-          >
-            People
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("animals")}
-            className="rounded-full px-4 py-1.5 text-sm font-semibold transition-colors"
-            style={{
-              background: tab === "animals" ? "var(--gold)" : "var(--ground-raised-2)",
-              color: tab === "animals" ? "#1a1206" : "var(--ink-dim)",
-            }}
-          >
-            Animals
-          </button>
+        <div className="mb-3 flex flex-wrap gap-2">
+          {CATEGORY_TABS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className="rounded-full px-4 py-1.5 text-sm font-semibold transition-colors"
+              style={{
+                background: tab === t.key ? "var(--gold)" : "var(--ground-raised-2)",
+                color: tab === t.key ? "#1a1206" : "var(--ink-dim)",
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
         <div className="grid max-h-72 grid-cols-6 gap-2 overflow-y-auto pr-1 sm:grid-cols-8">
           {tiles.map((entry) => {
