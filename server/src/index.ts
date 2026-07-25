@@ -5,6 +5,8 @@ import { Server } from "socket.io";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isGateEnabled, passcodeGate, socketAuthMiddleware, unlockHandler } from "./security/passcodeGate.js";
+import { registerRoomHandlers } from "./rooms/socketHandlers.js";
+import { sweepStaleRooms } from "./rooms/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
@@ -39,11 +41,14 @@ io.use(socketAuthMiddleware);
 
 io.on("connection", (socket) => {
   console.log(`socket connected: ${socket.id}`);
+  registerRoomHandlers(io, socket);
 
   socket.on("disconnect", () => {
     console.log(`socket disconnected: ${socket.id}`);
   });
 });
+
+setInterval(sweepStaleRooms, 60_000);
 
 httpServer.listen(PORT, () => {
   console.log(`donkey-kaun server listening on port ${PORT}`);

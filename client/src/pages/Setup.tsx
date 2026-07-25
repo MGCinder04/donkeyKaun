@@ -34,6 +34,7 @@ export function Setup() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = params.get("next");
+  const roomCode = params.get("code");
 
   const identity = useIdentity();
   const isEditing = identity.avatar !== null;
@@ -48,7 +49,9 @@ export function Setup() {
     if (!canContinue) return;
     identity.setName(name.trim());
     identity.setAvatar(resolveAvatarChoice(selection));
-    if (next === "create" || next === "join") {
+    if (next === "room" && roomCode) {
+      navigate(`/room/${roomCode}`);
+    } else if (next === "create" || next === "join") {
       navigate(`/${next}`);
     } else {
       navigate(-1);
