@@ -1,3 +1,6 @@
+import type { GameState } from "../game/engine.js";
+import type { PublicGameState } from "../game/publicState.js";
+
 export interface AvatarChoice {
   catalogId: string;
   colorKey: string;
@@ -21,6 +24,7 @@ export interface Room {
   status: RoomStatus;
   players: Player[];
   createdAt: number;
+  game: GameState | null;
 }
 
 export interface PublicPlayer {
@@ -35,6 +39,20 @@ export interface PublicRoom {
   code: string;
   status: RoomStatus;
   players: PublicPlayer[];
+  game: PublicGameState | null;
 }
 
-export type RoomErrorCode = "not_found" | "full" | "in_progress" | "invalid" | "not_host" | "cant_start";
+export type RoomErrorCode =
+  | "not_found"
+  | "full"
+  | "in_progress"
+  | "invalid"
+  | "not_host"
+  | "cant_start"
+  | "not_playing"
+  | "wrong_phase"
+  | "not_your_turn"
+  | "invalid_bid"
+  | "dealer_restricted"
+  | "not_your_card"
+  | "must_follow_suit";

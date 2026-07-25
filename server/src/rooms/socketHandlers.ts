@@ -1,11 +1,18 @@
 import type { Server, Socket } from "socket.io";
+import type { Card } from "../game/cards.js";
+import { privateHandFor } from "../game/publicState.js";
 import {
+  bidInRoom,
+  continueGameInRoom,
   createRoom,
+  exitGameInRoom,
   findRoom,
   joinRoom,
   kickPlayer,
   leaveRoom,
   markSocketDisconnected,
+  newGameInRoom,
+  playCardInRoom,
   startRoom,
   toPublicRoom,
   updateProfile,
@@ -21,14 +28,27 @@ interface RoomPayload {
   name?: unknown;
   avatar?: unknown;
   targetDeviceId?: unknown;
+  bid?: unknown;
+  card?: unknown;
 }
 
 function noop() {}
+
+function isCard(value: unknown): value is Card {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.suit === "string" && typeof v.rank === "string";
+}
 
 function broadcastRoom(io: Server, code: string): void {
   const room = findRoom(code);
   if (!room) return;
   io.to(room.code).emit("room:state", toPublicRoom(room));
+  if (!room.game) return;
+  for (const player of room.players) {
+    if (!player.socketId) continue;
+    io.to(player.socketId).emit("game:hand", privateHandFor(room.game, player.deviceId));
+  }
 }
 
 export function registerRoomHandlers(io: Server, socket: Socket): void {
@@ -118,6 +138,77 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     socket.leave(payload.code);
     leaveRoom(payload.code, payload.deviceId);
     broadcastRoom(io, payload.code);
+  });
+
+  socket.on("game:bid", (payload: RoomPayload, ack: Ack<null> = noop) => {
+    if (typeof payload?.code !== "string" || typeof payload?.deviceId !== "string" || typeof payload?.bid !== "number") {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    const result = bidInRoom(payload.code, payload.deviceId, payload.bid);
+    if (!result.ok) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+    ack({ ok: true, value: null });
+    broadcastRoom(io, payload.code);
+  });
+
+  socket.on("game:play", (payload: RoomPayload, ack: Ack<null> = noop) => {
+    if (typeof payload?.code !== "string" || typeof payload?.deviceId !== "string" || !isCard(payload?.card)) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    const result = playCardInRoom(payload.code, payload.deviceId, payload.card);
+    if (!result.ok) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+    ack({ ok: true, value: null });
+    broadcastRoom(io, payload.code);
+  });
+
+  socket.on("game:new", (payload: RoomPayload, ack: Ack<null> = noop) => {
+    if (typeof payload?.code !== "string" || typeof payload?.deviceId !== "string") {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    const result = newGameInRoom(payload.code, payload.deviceId);
+    if (!result.ok) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+    ack({ ok: true, value: null });
+    broadcastRoom(io, payload.code);
+  });
+
+  socket.on("game:continue", (payload: RoomPayload, ack: Ack<null> = noop) => {
+    if (typeof payload?.code !== "string" || typeof payload?.deviceId !== "string") {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    const result = continueGameInRoom(payload.code, payload.deviceId);
+    if (!result.ok) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+    ack({ ok: true, value: null });
+    broadcastRoom(io, payload.code);
+  });
+
+  socket.on("game:exit", (payload: RoomPayload, ack: Ack<null> = noop) => {
+    if (typeof payload?.code !== "string" || typeof payload?.deviceId !== "string") {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    const code = payload.code;
+    const result = exitGameInRoom(code, payload.deviceId);
+    if (!result.ok) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+    ack({ ok: true, value: null });
+    io.to(code).emit("room:exited", { code });
   });
 
   socket.on("disconnect", () => {

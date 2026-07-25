@@ -1,3 +1,6 @@
+import type { Card } from "../game/cards.js";
+import { continueGame, newGame, placeBid, playCard, startGame } from "../game/engine.js";
+import { toPublicGameState } from "../game/publicState.js";
 import type { AvatarChoice, Player, PublicPlayer, PublicRoom, Room, RoomErrorCode } from "./types.js";
 
 export const MAX_PLAYERS = 6;
@@ -52,7 +55,7 @@ export function createRoom(
 
   const code = generateCode();
   const player: Player = { deviceId, name, avatar, socketId, joinedAt: Date.now(), disconnectedAt: null };
-  const room: Room = { code, status: "lobby", players: [player], createdAt: Date.now() };
+  const room: Room = { code, status: "lobby", players: [player], createdAt: Date.now(), game: null };
   rooms.set(code, room);
   return { ok: true, value: room };
 }
@@ -117,7 +120,62 @@ export function startRoom(code: string, deviceId: string): RoomResult<Room> {
     return { ok: false, error: "cant_start" };
   }
   room.status = "playing";
+  room.game = startGame(room.players.map((p) => p.deviceId));
   return { ok: true, value: room };
+}
+
+export function bidInRoom(code: string, deviceId: string, bid: number): RoomResult<Room> {
+  const room = findRoom(code);
+  if (!room) return { ok: false, error: "not_found" };
+  if (!room.game) return { ok: false, error: "not_playing" };
+  const result = placeBid(room.game, deviceId, bid);
+  if (!result.ok) return { ok: false, error: result.error };
+  room.game = result.value;
+  return { ok: true, value: room };
+}
+
+export function playCardInRoom(code: string, deviceId: string, card: Card): RoomResult<Room> {
+  const room = findRoom(code);
+  if (!room) return { ok: false, error: "not_found" };
+  if (!room.game) return { ok: false, error: "not_playing" };
+  const result = playCard(room.game, deviceId, card);
+  if (!result.ok) return { ok: false, error: result.error };
+  room.game = result.value;
+  return { ok: true, value: room };
+}
+
+function requireHostAtGameEnd(room: Room, deviceId: string): RoomErrorCode | null {
+  const host = toPublicRoom(room).players.find((p) => p.isHost);
+  if (!host || host.deviceId !== deviceId) return "not_host";
+  if (!room.game || room.game.phase !== "game-end") return "wrong_phase";
+  return null;
+}
+
+export function newGameInRoom(code: string, deviceId: string): RoomResult<Room> {
+  const room = findRoom(code);
+  if (!room) return { ok: false, error: "not_found" };
+  const err = requireHostAtGameEnd(room, deviceId);
+  if (err) return { ok: false, error: err };
+  room.game = newGame(room.game!);
+  return { ok: true, value: room };
+}
+
+export function continueGameInRoom(code: string, deviceId: string): RoomResult<Room> {
+  const room = findRoom(code);
+  if (!room) return { ok: false, error: "not_found" };
+  const err = requireHostAtGameEnd(room, deviceId);
+  if (err) return { ok: false, error: err };
+  room.game = continueGame(room.game!);
+  return { ok: true, value: room };
+}
+
+export function exitGameInRoom(code: string, deviceId: string): RoomResult<null> {
+  const room = findRoom(code);
+  if (!room) return { ok: false, error: "not_found" };
+  const err = requireHostAtGameEnd(room, deviceId);
+  if (err) return { ok: false, error: err };
+  rooms.delete(room.code);
+  return { ok: true, value: null };
 }
 
 export interface KickResult {
@@ -178,7 +236,7 @@ export function toPublicRoom(room: Room): PublicRoom {
     connected: p.socketId !== null,
     isHost: p.deviceId === hostDeviceId,
   }));
-  return { code: room.code, status: room.status, players };
+  return { code: room.code, status: room.status, players, game: room.game ? toPublicGameState(room.game) : null };
 }
 
 /** Periodic sweep: drop long-disconnected players from lobbies (frees the seat) and empty rooms. */

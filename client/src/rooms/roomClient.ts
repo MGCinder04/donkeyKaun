@@ -1,6 +1,6 @@
 import { getSocket } from "./socket";
 import type { AvatarChoice } from "../identity/useIdentity";
-import type { Envelope, PublicRoom } from "./types";
+import type { Card, Envelope, PrivateHand, PublicRoom } from "./types";
 
 function request<T>(event: string, payload: Record<string, unknown>): Promise<Envelope<T>> {
   return new Promise((resolve) => {
@@ -64,4 +64,37 @@ export function onKicked(cb: (code: string) => void): () => void {
   const handler = (payload: { code: string }) => cb(payload.code);
   socket.on("room:kicked", handler);
   return () => socket.off("room:kicked", handler);
+}
+
+export function onRoomExited(cb: (code: string) => void): () => void {
+  const socket = getSocket();
+  const handler = (payload: { code: string }) => cb(payload.code);
+  socket.on("room:exited", handler);
+  return () => socket.off("room:exited", handler);
+}
+
+export function placeBid(code: string, deviceId: string, bid: number) {
+  return request<null>("game:bid", { code, deviceId, bid });
+}
+
+export function playCard(code: string, deviceId: string, card: Card) {
+  return request<null>("game:play", { code, deviceId, card });
+}
+
+export function newGame(code: string, deviceId: string) {
+  return request<null>("game:new", { code, deviceId });
+}
+
+export function continueGame(code: string, deviceId: string) {
+  return request<null>("game:continue", { code, deviceId });
+}
+
+export function exitGame(code: string, deviceId: string) {
+  return request<null>("game:exit", { code, deviceId });
+}
+
+export function onHand(cb: (hand: PrivateHand) => void): () => void {
+  const socket = getSocket();
+  socket.on("game:hand", cb);
+  return () => socket.off("game:hand", cb);
 }
