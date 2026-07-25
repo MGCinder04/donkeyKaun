@@ -1,28 +1,14 @@
-import { createAvatar } from "@dicebear/core";
-import type { Style } from "@dicebear/core";
-import {
-  adventurer,
-  avataaars,
-  bigSmile,
-  croodles,
-  funEmoji,
-  notionists,
-  openPeeps,
-  personas,
-  thumbs,
-} from "@dicebear/collection";
-
-export const DICEBEAR_STYLES: Record<string, Style<object>> = {
-  adventurer,
-  avataaars,
-  bigSmile,
-  croodles,
-  funEmoji,
-  notionists,
-  openPeeps,
-  personas,
-  thumbs,
-};
+export const DICEBEAR_STYLE_KEYS = [
+  "adventurer",
+  "avataaars",
+  "bigSmile",
+  "croodles",
+  "funEmoji",
+  "notionists",
+  "openPeeps",
+  "personas",
+  "thumbs",
+];
 
 const PEOPLE_SEEDS = ["Amara", "Kiran", "Zoya", "Devan", "Leela", "Farid"];
 
@@ -39,14 +25,13 @@ export interface CatalogEntry {
   emoji?: string;
 }
 
-export const PEOPLE_CATALOG: CatalogEntry[] = Object.keys(DICEBEAR_STYLES).flatMap(
-  (styleKey) =>
-    PEOPLE_SEEDS.map((seed) => ({
-      id: `${styleKey}-${seed}`,
-      kind: "dicebear" as const,
-      styleKey,
-      seed,
-    })),
+export const PEOPLE_CATALOG: CatalogEntry[] = DICEBEAR_STYLE_KEYS.flatMap((styleKey) =>
+  PEOPLE_SEEDS.map((seed) => ({
+    id: `${styleKey}-${seed}`,
+    kind: "dicebear" as const,
+    styleKey,
+    seed,
+  })),
 );
 
 export const ANIMAL_CATALOG: CatalogEntry[] = ANIMAL_EMOJI.map((emoji, i) => ({
@@ -79,13 +64,9 @@ export function colorHex(colorKey: string): string {
   return COLOR_PALETTE.find((c) => c.key === colorKey)?.hex ?? COLOR_PALETTE[0].hex;
 }
 
-export function renderDicebearDataUri(styleKey: string, seed: string, colorKey: string): string {
-  const style = DICEBEAR_STYLES[styleKey];
-  const avatar = createAvatar(style, {
-    seed,
-    backgroundColor: [colorHex(colorKey)],
-    radius: 50,
-    size: 128,
-  });
-  return avatar.toDataUri();
+/** In-progress pick while editing — resolved into a full AvatarChoice (with a cached
+ *  preview image) only when the user confirms, so we don't re-render on every click. */
+export interface AvatarSelection {
+  catalogId: string;
+  colorKey: string;
 }

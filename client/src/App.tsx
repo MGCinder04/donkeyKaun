@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import "./App.css";
 import { Landing } from "./pages/Landing";
 import { ComingSoon } from "./pages/ComingSoon";
+import { TopBar } from "./components/TopBar";
 
 const Setup = lazy(() => import("./pages/Setup").then((m) => ({ default: m.Setup })));
 
@@ -10,6 +11,7 @@ function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen" style={{ background: "var(--ground)" }}>
+        <TopBar />
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route

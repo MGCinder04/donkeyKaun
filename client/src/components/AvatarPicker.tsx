@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { AVATAR_CATALOG, COLOR_PALETTE } from "../identity/avatarCatalog";
+import { AVATAR_CATALOG, COLOR_PALETTE } from "../identity/avatarPalette";
 import { AvatarImage } from "./AvatarImage";
-import type { AvatarChoice } from "../identity/useIdentity";
+import type { AvatarSelection } from "../identity/avatarPalette";
 
 interface AvatarPickerProps {
-  value: AvatarChoice | null;
-  onChange: (choice: AvatarChoice) => void;
+  value: AvatarSelection | null;
+  onChange: (choice: AvatarSelection) => void;
 }
 
 export function AvatarPicker({ value, onChange }: AvatarPickerProps) {

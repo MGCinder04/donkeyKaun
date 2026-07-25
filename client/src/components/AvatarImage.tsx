@@ -1,9 +1,6 @@
 import { useMemo } from "react";
-import {
-  findCatalogEntry,
-  renderDicebearDataUri,
-  colorHex,
-} from "../identity/avatarCatalog";
+import { findCatalogEntry, colorHex } from "../identity/avatarPalette";
+import { renderDicebearDataUri } from "../identity/dicebearRender";
 
 interface AvatarImageProps {
   catalogId: string;
