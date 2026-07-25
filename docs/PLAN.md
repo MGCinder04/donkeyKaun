@@ -133,13 +133,16 @@ Each milestone ends with a checklist below and a demo for live testing before me
       the auto-disconnect sweep is lobby-only), but the engine has no auto-forfeit for
       it yet, so a departed player's seat just stalls everyone else's turn
 
-### M3 — Game UI & Animation
-- [ ] Circular table layout (desktop + mobile)
-- [ ] Dealing animation
-- [ ] Legal/illegal card highlighting (Hearts-style)
-- [ ] Trick-to-winner animation
-- [ ] Live bids, scoreboard, trump/round indicators
-- [ ] Reconnect handling
+### M3 — Game UI & Animation ✅
+- [x] Circular table layout (desktop + mobile) — ego-centric, you're always at 6 o'clock
+- [x] Dealing animation — round-robin, one card per player at a time, real deal order
+- [x] Legal/illegal card highlighting (Hearts-style)
+- [x] Trick-to-winner animation — last card and sweep both animate (needed a server-side
+      fix so the "trick complete" state actually reaches clients before it resolves)
+- [x] Live bids, scoreboard, trump/round indicators, plus a scoresheet popup and a
+      prominent round-end recap that fades to a compact persistent line
+- [x] Reconnect handling — greyed/pulsing avatar + "reconnecting…" at the table,
+      verified to clear automatically once the player's socket comes back
 
 ### M4 — Voice Chat
 - [ ] WebRTC mesh signaling over Socket.io

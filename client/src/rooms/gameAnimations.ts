@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { PublicGameState, Suit, TrickCard } from "./types";
+import type { PublicGameState, RoundSummary, Suit, TrickCard } from "./types";
 
 const RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
 function rankValue(rank: string): number {
@@ -123,4 +123,29 @@ export function useTrickAnimation(game: PublicGameState): TrickAnimationState {
   useEffect(() => () => timersRef.current.forEach(clearTimeout), []);
 
   return { displayTrick, sweepWinnerSeat, sweeping };
+}
+
+const ROUND_RECAP_MS = 4500;
+
+/** Shows a prominent recap the moment a round completes, then auto-hides — separate
+ *  from the small persistent "Round N result" line, which stays up for reference. Keyed
+ *  off `lastRoundSummary`'s object identity, which the engine only replaces when a round
+ *  actually finishes (not on every unrelated broadcast within the same round). */
+export function useRoundRecap(game: PublicGameState): { visible: boolean; summary: RoundSummary | null } {
+  const [visible, setVisible] = useState(false);
+  const seenRef = useRef<RoundSummary | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    const summary = game.lastRoundSummary;
+    if (!summary || summary === seenRef.current) return;
+    seenRef.current = summary;
+    setVisible(true);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setVisible(false), ROUND_RECAP_MS);
+  }, [game.lastRoundSummary]);
+
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  return { visible, summary: game.lastRoundSummary };
 }

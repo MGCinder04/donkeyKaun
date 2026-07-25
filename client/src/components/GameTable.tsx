@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AvatarThumb } from "./AvatarThumb";
 import { Button } from "./Button";
 import { ScoreSheetModal } from "./ScoreSheetModal";
 import { gameSeatPosition, pileSlotPosition } from "../rooms/gameSeatLayout";
-import { useDealAnimation, useTrickAnimation } from "../rooms/gameAnimations";
+import { useDealAnimation, useRoundRecap, useTrickAnimation } from "../rooms/gameAnimations";
 import { SUIT_COLOR, SUIT_SYMBOL, cardKey, cardLabel } from "../lib/cardDisplay";
 import type { Card, PublicGameState, PublicPlayer } from "../rooms/types";
 
@@ -44,6 +44,18 @@ export function GameTable({
 
   const { dealing, dealEvents } = useDealAnimation(game);
   const { displayTrick, sweepWinnerSeat, sweeping } = useTrickAnimation(game);
+  const { visible: recapVisible, summary: roundSummary } = useRoundRecap(game);
+
+  const confettiParticles = useMemo(
+    () =>
+      Array.from({ length: 14 }, (_, i) => ({
+        angle: (360 / 14) * i + (i % 2 === 0 ? 8 : -8),
+        distance: 60 + (i % 3) * 20,
+        symbol: ["♠", "♥", "♦", "♣"][i % 4],
+        delay: (i % 5) * 0.05,
+      })),
+    [],
+  );
 
   const isMyBidTurn = game.phase === "bidding" && game.bidTurnDeviceId === myDeviceId;
   const isMyPlayTurn = game.phase === "trick" && game.turnDeviceId === myDeviceId;
@@ -57,13 +69,48 @@ export function GameTable({
 
   return (
     <section className="mx-auto max-w-2xl px-4 pb-16 text-center">
-      {game.lastRoundSummary && (
-        <p className="mb-3 text-xs" style={{ color: "var(--ink-faint)" }}>
-          Round {game.lastRoundSummary.round} result:{" "}
-          {game.lastRoundSummary.results
-            .map((r) => `${nameFor(r.deviceId)} ${r.bid}→${r.tricksWon} (${r.roundScore})`)
-            .join(" · ")}
-        </p>
+      {roundSummary && (
+        <AnimatePresence mode="wait">
+          {recapVisible ? (
+            <motion.div
+              key="recap-rich"
+              className="mx-auto mb-4 max-w-md rounded-2xl border px-5 py-3 text-left"
+              style={{ background: "var(--ground-raised)", borderColor: "var(--hairline)" }}
+              initial={{ opacity: 0, y: -8, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.97 }}
+              transition={{ type: "spring", stiffness: 300, damping: 24 }}
+            >
+              <p className="mb-2 text-xs font-semibold uppercase" style={{ color: "var(--gold)", letterSpacing: "0.14em" }}>
+                Round {roundSummary.round} complete
+              </p>
+              <div className="flex flex-col gap-1">
+                {roundSummary.results.map((r) => {
+                  const made = r.bid === r.tricksWon;
+                  return (
+                    <div key={r.deviceId} className="flex items-center justify-between gap-6 text-sm">
+                      <span style={{ color: "var(--ink)" }}>{nameFor(r.deviceId)}</span>
+                      <span style={{ color: made ? "var(--gold-bright)" : "var(--brick)" }}>
+                        bid {r.bid} → won {r.tricksWon} · {r.roundScore} pts
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          ) : (
+            <motion.p
+              key="recap-compact"
+              className="mb-3 text-xs"
+              style={{ color: "var(--ink-faint)" }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+            >
+              Round {roundSummary.round} result:{" "}
+              {roundSummary.results.map((r) => `${nameFor(r.deviceId)} ${r.bid}→${r.tricksWon} (${r.roundScore})`).join(" · ")}
+            </motion.p>
+          )}
+        </AnimatePresence>
       )}
 
       <div className="relative mx-auto mb-6 h-[380px] max-w-xl">
@@ -167,7 +214,11 @@ export function GameTable({
               className="absolute flex w-16 -translate-x-1/2 -translate-y-1/2 flex-col items-center text-center"
               style={{ top: position.top, left: position.left }}
             >
-              <div className="relative mb-1">
+              <motion.div
+                className="relative mb-1"
+                animate={player && !player.connected ? { opacity: [1, 0.45, 1] } : { opacity: 1 }}
+                transition={player && !player.connected ? { repeat: Infinity, duration: 1.6, ease: "easeInOut" } : undefined}
+              >
                 {player && (
                   <AvatarThumb
                     avatar={player.avatar}
@@ -190,7 +241,7 @@ export function GameTable({
                     D
                   </span>
                 )}
-              </div>
+              </motion.div>
               <span
                 className="max-w-[4.5rem] truncate text-xs font-semibold"
                 style={{ color: isSelf ? "var(--gold-bright)" : "var(--ink)" }}
@@ -291,12 +342,44 @@ export function GameTable({
       )}
 
       {game.phase === "game-end" && (
-        <div className="mb-8">
-          <h3 className="mb-3 text-xl font-bold">Game over</h3>
-          <p className="mb-4 text-sm" style={{ color: "var(--ink-dim)" }}>
+        <div className="relative mb-8">
+          <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center overflow-visible">
+            {confettiParticles.map((p, i) => {
+              const rad = (p.angle * Math.PI) / 180;
+              const x = Math.cos(rad) * p.distance;
+              const y = Math.sin(rad) * p.distance;
+              return (
+                <motion.span
+                  key={i}
+                  className="absolute text-lg"
+                  style={{ color: i % 2 === 0 ? "var(--gold-bright)" : "var(--brick)" }}
+                  initial={{ x: 0, y: 0, opacity: 1, scale: 0.6 }}
+                  animate={{ x, y, opacity: 0, scale: 1 }}
+                  transition={{ duration: 1.1, delay: p.delay, ease: "easeOut" }}
+                >
+                  {p.symbol}
+                </motion.span>
+              );
+            })}
+          </div>
+          <motion.h3
+            className="mb-3 text-xl font-bold"
+            initial={{ scale: 0.6, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: "spring", stiffness: 260, damping: 18 }}
+          >
+            Game over
+          </motion.h3>
+          <motion.p
+            className="mb-4 text-sm"
+            style={{ color: "var(--ink-dim)" }}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+          >
             {game.donkeys?.map(nameFor).join(", ")} {game.donkeys && game.donkeys.length > 1 ? "are" : "is"} the Donkey
             🫏
-          </p>
+          </motion.p>
           {isHost ? (
             <div className="flex flex-wrap justify-center gap-3">
               <Button variant="primary" onClick={onNewGame}>
