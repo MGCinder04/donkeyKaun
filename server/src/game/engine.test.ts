@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { Card } from "./cards.js";
-import { continueGame, legalCards, newGame, placeBid, playCard, startGame, type GameState } from "./engine.js";
+import {
+  continueGame,
+  legalCards,
+  newGame,
+  placeBid,
+  playCard,
+  resolvePendingTrick,
+  startGame,
+  type GameState,
+} from "./engine.js";
 
 /** Deterministic PRNG (mulberry32) so dealing is reproducible in tests. */
 function seededRng(seed: number): () => number {
@@ -168,27 +177,68 @@ describe("trick play", () => {
     let s = (playCard(state, "p1", c("S", "A")) as { ok: true; value: GameState }).value;
     expect(legalCards(s, "p2")).toEqual(s.hands.p2); // no spades, free to discard or trump
     s = (playCard(s, "p2", c("H", "2")) as { ok: true; value: GameState }).value; // trumps with the 2 of hearts
-    const result = playCard(s, "p3", c("S", "K")) as { ok: true; value: GameState }; // highest spade, still loses
-    expect(result.ok).toBe(true);
-    expect(result.value.tricksWon).toEqual({ p1: 0, p2: 1, p3: 0 });
+    const played = playCard(s, "p3", c("S", "K")) as { ok: true; value: GameState }; // highest spade, still loses
+    expect(played.ok).toBe(true);
+    // Trick is complete but deliberately left unresolved (see engine.ts) so the room
+    // store can broadcast a full-pile snapshot before it resolves.
+    expect(played.value.currentTrick).toHaveLength(3);
+    expect(played.value.turnSeat).toBe(-1);
+    const resolved = resolvePendingTrick(played.value);
+    expect(resolved.tricksWon).toEqual({ p1: 0, p2: 1, p3: 0 });
+  });
+
+  it("blocks every player from acting while a completed trick awaits resolution", () => {
+    const state: GameState = {
+      round: 1,
+      cardsThisRound: 2,
+      dealerSeat: 0,
+      trumpSuit: "H",
+      seatOrder: ["p1", "p2", "p3"],
+      hands: {
+        p1: [c("S", "A"), c("D", "2")],
+        p2: [c("H", "2"), c("C", "3")],
+        p3: [c("S", "K"), c("D", "3")],
+      },
+      phase: "trick",
+      bids: { p1: 0, p2: 0, p3: 0 },
+      bidOrder: ["p2", "p3", "p1"],
+      bidTurnIndex: 3,
+      tricksWon: { p1: 0, p2: 0, p3: 0 },
+      currentTrick: [],
+      turnSeat: 0,
+      scores: { p1: 0, p2: 0, p3: 0 },
+      lastRoundSummary: null,
+      roundHistory: [],
+      donkeys: null,
+    };
+
+    let s = (playCard(state, "p1", c("S", "A")) as { ok: true; value: GameState }).value;
+    s = (playCard(s, "p2", c("H", "2")) as { ok: true; value: GameState }).value;
+    const played = playCard(s, "p3", c("S", "K")) as { ok: true; value: GameState };
+    s = played.value;
+
+    // Nobody — not even whoever would lead next — can act until resolvePendingTrick runs.
+    expect(playCard(s, "p1", c("D", "2"))).toEqual({ ok: false, error: "not_your_turn" });
+    expect(playCard(s, "p2", c("C", "3"))).toEqual({ ok: false, error: "not_your_turn" });
+    expect(playCard(s, "p3", c("D", "3"))).toEqual({ ok: false, error: "not_your_turn" });
   });
 
   it("highest card of the led suit wins when no trump is played, and rolls the round into round 2", () => {
     let state = trickFixture();
     state = (playCard(state, "p1", c("S", "A")) as { ok: true; value: GameState }).value;
     state = (playCard(state, "p2", c("S", "K")) as { ok: true; value: GameState }).value;
-    let afterTrick1 = playCard(state, "p3", c("H", "K")) as { ok: true; value: GameState };
-    expect(afterTrick1.ok).toBe(true);
-    state = afterTrick1.value;
+    const trick1Played = playCard(state, "p3", c("H", "K")) as { ok: true; value: GameState };
+    expect(trick1Played.ok).toBe(true);
+    expect(trick1Played.value.turnSeat).toBe(-1); // complete, pending resolution
+    state = resolvePendingTrick(trick1Played.value);
     expect(state.tricksWon.p1).toBe(1); // S-A beat S-K; the discarded H-K never contested
     expect(state.turnSeat).toBe(state.seatOrder.indexOf("p1")); // trick winner leads next
 
     state = (playCard(state, "p1", c("H", "2")) as { ok: true; value: GameState }).value;
-    const afterTrick2 = playCard(state, "p2", c("H", "A")) as { ok: true; value: GameState };
-    state = afterTrick2.value;
-    const final = playCard(state, "p3", c("D", "2")) as { ok: true; value: GameState };
-    expect(final.ok).toBe(true);
-    state = final.value;
+    state = (playCard(state, "p2", c("H", "A")) as { ok: true; value: GameState }).value;
+    const trick2Played = playCard(state, "p3", c("D", "2")) as { ok: true; value: GameState };
+    expect(trick2Played.ok).toBe(true);
+    state = resolvePendingTrick(trick2Played.value);
 
     // p2 won trick 2 (H-A beats H-2; p3's D-2 discard never contested)
     // p1 bid 1, won 1 -> exact -> (1+1)*10+1 = 21
@@ -237,9 +287,9 @@ describe("trick play", () => {
 
     let s = (playCard(state, "p1", c("S", "A")) as { ok: true; value: GameState }).value;
     s = (playCard(s, "p2", c("S", "K")) as { ok: true; value: GameState }).value;
-    const result = playCard(s, "p3", c("H", "2")) as { ok: true; value: GameState };
-    expect(result.ok).toBe(true);
-    s = result.value;
+    const played = playCard(s, "p3", c("H", "2")) as { ok: true; value: GameState };
+    expect(played.ok).toBe(true);
+    s = resolvePendingTrick(played.value);
 
     // p1 wins the only trick (S-A beats S-K); bid 0, won 1 -> mismatch -> score = bid = 0
     // p2 bid 0, won 0 -> exact -> 10

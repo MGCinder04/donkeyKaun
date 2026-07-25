@@ -203,22 +203,30 @@ export function playCard(state: GameState, deviceId: string, card: Card, rng: ()
     return { ok: true, value: { ...state, hands, currentTrick, turnSeat } };
   }
 
-  const leadSuit = currentTrick[0].card.suit;
-  const winnerId = resolveTrick(currentTrick, leadSuit, state.trumpSuit);
+  // The trick is complete but deliberately left unresolved here — turnSeat -1 means
+  // nobody's turn, so no further plays are accepted. The caller (room store) broadcasts
+  // this full-pile state first, so clients actually get a snapshot with all cards
+  // visible to animate, then calls resolvePendingTrick after a short pause. Resolving
+  // synchronously in this same call would mean the server only ever broadcasts "trick
+  // cleared, score updated" and clients would have nothing to animate the sweep from.
+  return { ok: true, value: { ...state, hands, currentTrick, turnSeat: -1 } };
+}
+
+export function isTrickComplete(state: GameState): boolean {
+  return state.phase === "trick" && state.currentTrick.length === state.seatOrder.length;
+}
+
+export function resolvePendingTrick(state: GameState, rng: () => number = Math.random): GameState {
+  const leadSuit = state.currentTrick[0].card.suit;
+  const winnerId = resolveTrick(state.currentTrick, leadSuit, state.trumpSuit);
   const tricksWon = { ...state.tricksWon, [winnerId]: (state.tricksWon[winnerId] ?? 0) + 1 };
   const winnerSeat = state.seatOrder.indexOf(winnerId);
 
-  const roundOver = Object.values(hands).every((h) => h.length === 0);
-  const afterTrick: GameState = {
-    ...state,
-    hands,
-    currentTrick: [],
-    tricksWon,
-    turnSeat: winnerSeat,
-  };
+  const roundOver = Object.values(state.hands).every((h) => h.length === 0);
+  const afterTrick: GameState = { ...state, currentTrick: [], tricksWon, turnSeat: winnerSeat };
 
-  if (!roundOver) return { ok: true, value: afterTrick };
-  return { ok: true, value: finishRound(afterTrick, rng) };
+  if (!roundOver) return afterTrick;
+  return finishRound(afterTrick, rng);
 }
 
 export function newGame(state: GameState, rng: () => number = Math.random): GameState {

@@ -13,8 +13,10 @@ import {
   markSocketDisconnected,
   newGameInRoom,
   playCardInRoom,
+  resolvePendingTrickInRoom,
   startRoom,
   toPublicRoom,
+  trickPendingResolution,
   updateProfile,
 } from "./store.js";
 import type { PublicRoom, RoomErrorCode } from "./types.js";
@@ -33,6 +35,11 @@ interface RoomPayload {
 }
 
 function noop() {}
+
+// How long a completed trick sits fully visible before it resolves (winner computed,
+// pile cleared, score updated). Without this pause the client never receives a snapshot
+// with the full pile in it, so there's nothing to animate the sweep-to-winner from.
+const TRICK_RESOLVE_DELAY_MS = 250;
 
 function isCard(value: unknown): value is Card {
   if (typeof value !== "object" || value === null) return false;
@@ -166,6 +173,14 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     }
     ack({ ok: true, value: null });
     broadcastRoom(io, payload.code);
+
+    if (trickPendingResolution(result.value)) {
+      const code = payload.code;
+      setTimeout(() => {
+        const resolved = resolvePendingTrickInRoom(code);
+        if (resolved.ok) broadcastRoom(io, code);
+      }, TRICK_RESOLVE_DELAY_MS);
+    }
   });
 
   socket.on("game:new", (payload: RoomPayload, ack: Ack<null> = noop) => {

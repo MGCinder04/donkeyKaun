@@ -226,7 +226,13 @@ export function GameTable({
       )}
       {!dealing && game.phase === "trick" && (
         <p className="mb-3 text-sm" style={{ color: "var(--ink-dim)" }}>
-          {isMyPlayTurn ? "Your turn — play a card" : `Waiting for ${nameFor(game.turnDeviceId ?? "")}…`}
+          {sweeping && sweepWinnerSeat !== null
+            ? `${nameFor(game.seatOrder[sweepWinnerSeat])} wins the hand!`
+            : displayTrick.length === total
+              ? "Hand complete…"
+              : isMyPlayTurn
+                ? "Your turn — play a card"
+                : `Waiting for ${nameFor(game.turnDeviceId ?? "")}…`}
         </p>
       )}
 

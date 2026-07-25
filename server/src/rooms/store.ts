@@ -1,5 +1,5 @@
 import type { Card } from "../game/cards.js";
-import { continueGame, newGame, placeBid, playCard, startGame } from "../game/engine.js";
+import { continueGame, isTrickComplete, newGame, placeBid, playCard, resolvePendingTrick, startGame } from "../game/engine.js";
 import { toPublicGameState } from "../game/publicState.js";
 import type { AvatarChoice, Player, PublicPlayer, PublicRoom, Room, RoomErrorCode } from "./types.js";
 
@@ -141,6 +141,21 @@ export function playCardInRoom(code: string, deviceId: string, card: Card): Room
   const result = playCard(room.game, deviceId, card);
   if (!result.ok) return { ok: false, error: result.error };
   room.game = result.value;
+  return { ok: true, value: room };
+}
+
+/** A trick that just became full is deliberately left unresolved by playCardInRoom (see
+ *  engine.ts) so the room broadcasts a "full pile" snapshot before this gets called —
+ *  otherwise clients never see a state to animate the sweep-to-winner from. */
+export function trickPendingResolution(room: Room): boolean {
+  return Boolean(room.game && isTrickComplete(room.game));
+}
+
+export function resolvePendingTrickInRoom(code: string): RoomResult<Room> {
+  const room = findRoom(code);
+  if (!room) return { ok: false, error: "not_found" };
+  if (!room.game) return { ok: false, error: "not_playing" };
+  room.game = resolvePendingTrick(room.game);
   return { ok: true, value: room };
 }
 
