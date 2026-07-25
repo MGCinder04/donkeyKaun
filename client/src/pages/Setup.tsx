@@ -40,10 +40,14 @@ export function Setup() {
         style={{ background: "var(--ground-raised)", borderColor: "var(--hairline)" }}
       >
         <input
+          id="player-name"
+          name="playerName"
+          autoComplete="name"
           value={name}
           onChange={(e) => setName(e.target.value)}
           maxLength={20}
           placeholder="Your name"
+          aria-label="Your name"
           className="mb-6 w-full max-w-[240px] rounded-lg border px-3 py-2.5 text-center outline-none"
           style={{
             background: "var(--ground-raised-2)",

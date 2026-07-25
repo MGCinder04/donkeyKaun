@@ -27,8 +27,6 @@
   --ground: #efe6ce;
   --ground-raised: #f7f1e0;
   --ground-raised-2: #fbf7ec;
-  --card-stock: #16291f;
-  --card-stock-shadow: #0e1d17;
   --ink: #17281f;
   --ink-dim: #4b5c50;
   --ink-faint: #7c8c80;
@@ -43,8 +41,6 @@
     --ground: #efe6ce;
     --ground-raised: #f7f1e0;
     --ground-raised-2: #fbf7ec;
-    --card-stock: #16291f;
-    --card-stock-shadow: #0e1d17;
     --ink: #17281f;
     --ink-dim: #4b5c50;
     --ink-faint: #7c8c80;
@@ -71,6 +67,7 @@ body {
   color: var(--ink);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
 }
 
 h1,

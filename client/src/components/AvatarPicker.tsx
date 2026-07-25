@@ -73,11 +73,16 @@ export function AvatarPicker({ value, onChange }: AvatarPickerProps) {
         <div className="grid max-h-72 grid-cols-6 gap-2 overflow-y-auto pr-1 sm:grid-cols-8">
           {tiles.map((entry) => {
             const isSelected = entry.id === selected.catalogId;
+            const label =
+              entry.kind === "animal"
+                ? `Choose ${entry.emoji} avatar`
+                : `Choose ${entry.styleKey} avatar, look ${entry.seed}`;
             return (
               <button
                 key={entry.id}
                 type="button"
                 onClick={() => selectCatalog(entry.id)}
+                aria-label={label}
                 aria-pressed={isSelected}
                 className="aspect-square rounded-full p-0.5 transition-transform hover:-translate-y-0.5"
                 style={{
