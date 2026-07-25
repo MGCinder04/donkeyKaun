@@ -107,13 +107,16 @@ Each milestone ends with a checklist below and a demo for live testing before me
 - [x] `work` branch created; git workflow documented (see section 6)
 - [x] First deploy to Render — "hello world" proving the pipeline end to end (live, passcode-gated)
 
-### M1 — Identity & Rooms
-- [ ] Landing page
-- [ ] Avatar picker (50+ avatars, customization) + name entry
-- [ ] Device-remembered identity (localStorage)
-- [ ] Create room → code + link + QR
-- [ ] Join room via code/link
-- [ ] Lobby: circular seating preview, host start-game gating (5 or 6 players)
+### M1 — Identity & Rooms ✅
+- [x] Landing page
+- [x] Avatar picker (74 avatars via DiceBear + curated animal emoji, fully recolorable) + name entry
+- [x] Device-remembered identity (localStorage)
+- [x] Create room → code + link + QR
+- [x] Join room via code/link
+- [x] Lobby: circular seating (live), host start-game gating (5 or 6 players)
+- [x] Extras added mid-milestone at your request: edit name/avatar anytime (header badge,
+      or click your own seat in the lobby — both sync live to everyone), manual light/dark
+      theme toggle
 
 ### M2 — Game Engine (server-authoritative, no UI polish yet)
 - [ ] Deck, dealing rotation, dealer rotation, trump rotation
