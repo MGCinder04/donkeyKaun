@@ -105,7 +105,7 @@ Each milestone ends with a checklist below and a demo for live testing before me
 - [x] Express + Socket.io + TS server scaffold, serves client build
 - [x] `.gitignore` covering `node_modules`, `dist`, `.env*`
 - [x] `work` branch created; git workflow documented (see section 6)
-- [ ] First deploy to Render — "hello world" proving the pipeline end to end
+- [x] First deploy to Render — "hello world" proving the pipeline end to end (live, passcode-gated)
 
 ### M1 — Identity & Rooms
 - [ ] Landing page
