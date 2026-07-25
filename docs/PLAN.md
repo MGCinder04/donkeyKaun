@@ -118,14 +118,20 @@ Each milestone ends with a checklist below and a demo for live testing before me
       or click your own seat in the lobby — both sync live to everyone), manual light/dark
       theme toggle
 
-### M2 — Game Engine (server-authoritative, no UI polish yet)
-- [ ] Deck, dealing rotation, dealer rotation, trump rotation
-- [ ] Bidding flow incl. dealer restriction rule
-- [ ] Trick play incl. follow-suit/trump/discard rules, trick winner logic
-- [ ] Scoring formula, round progression 8 → 1
-- [ ] End-of-game: new game / continue / exit
-- [ ] Automated tests for the rules above (this engine is the trickiest part to get
-      right — needs real test coverage, not just manual play)
+### M2 — Game Engine (server-authoritative, no UI polish yet) ✅
+- [x] Deck, dealing rotation, dealer rotation, trump rotation
+- [x] Bidding flow incl. dealer restriction rule
+- [x] Trick play incl. follow-suit/trump/discard rules, trick winner logic
+- [x] Scoring formula, round progression 8 → 1
+- [x] End-of-game: new game / continue / exit
+- [x] Automated tests for the rules above (12 vitest cases in
+      `server/src/game/engine.test.ts`)
+- [x] Minimal functional UI wired up to actually play (bidding buttons, legal/illegal
+      card highlighting, live scoreboard, game-end screen) — real animation and the
+      circular table layout are still M3
+- [ ] Known gap: voluntary leave/host-kick mid-game are still allowed (by design — only
+      the auto-disconnect sweep is lobby-only), but the engine has no auto-forfeit for
+      it yet, so a departed player's seat just stalls everyone else's turn
 
 ### M3 — Game UI & Animation
 - [ ] Circular table layout (desktop + mobile)
