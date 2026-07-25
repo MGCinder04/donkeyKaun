@@ -1,8 +1,6 @@
 import type { Request, Response } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-const COOKIE_NAME = "dk_auth";
-const MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000; // 180 days
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 10;
 
@@ -17,19 +15,6 @@ function safeEqual(a: string, b: string): boolean {
   const bufB = Buffer.from(b);
   if (bufA.length !== bufB.length) return false;
   return timingSafeEqual(bufA, bufB);
-}
-
-function parseCookies(header: string | undefined): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (!header) return out;
-  for (const part of header.split(";")) {
-    const idx = part.indexOf("=");
-    if (idx === -1) continue;
-    const key = part.slice(0, idx).trim();
-    const val = part.slice(idx + 1).trim();
-    if (key) out[key] = decodeURIComponent(val);
-  }
-  return out;
 }
 
 function isRateLimited(ip: string): boolean {
@@ -62,22 +47,19 @@ function isValidToken(token: string | undefined): boolean {
   return safeEqual(token, sign(sessionSecret(), "unlocked"));
 }
 
-/** Cross-origin in production (client is a separate static site), same-origin in dev
- *  (Vite proxies /api to the server), so the cookie needs different SameSite handling. */
-function cookieOptions() {
-  const cross = process.env.NODE_ENV === "production";
-  return {
-    httpOnly: true,
-    sameSite: cross ? ("none" as const) : ("lax" as const),
-    secure: cross,
-    maxAge: MAX_AGE_MS,
-  };
+function bearerToken(header: string | undefined): string | undefined {
+  if (!header?.startsWith("Bearer ")) return undefined;
+  return header.slice("Bearer ".length);
 }
 
+// Deliberately NOT a cookie: the client is a separate static-hosted origin from this
+// API (see render.yaml notes), which makes an auth cookie a third-party cookie from the
+// browser's perspective — Safari/mobile browsers purge or block those regardless of
+// maxAge, causing exactly the "keeps asking for the passcode" symptom this replaced.
+// A token the client stores itself and sends explicitly sidesteps that entirely.
 export function isUnlocked(req: Request): boolean {
   if (!isGateEnabled()) return true;
-  const cookies = parseCookies(req.headers.cookie);
-  return isValidToken(cookies[COOKIE_NAME]);
+  return isValidToken(bearerToken(req.headers.authorization));
 }
 
 export function sessionHandler(req: Request, res: Response): void {
@@ -86,7 +68,7 @@ export function sessionHandler(req: Request, res: Response): void {
 
 export function unlockHandler(req: Request, res: Response): void {
   if (!isGateEnabled()) {
-    res.json({ ok: true });
+    res.json({ ok: true, token: null });
     return;
   }
   const ip = req.ip ?? "unknown";
@@ -102,21 +84,19 @@ export function unlockHandler(req: Request, res: Response): void {
     res.status(401).json({ ok: false });
     return;
   }
-  const token = sign(secret, "unlocked");
-  res.cookie(COOKIE_NAME, token, cookieOptions());
-  res.json({ ok: true });
+  res.json({ ok: true, token: sign(secret, "unlocked") });
 }
 
 export function socketAuthMiddleware(
-  socket: { handshake: { headers: { cookie?: string } } },
+  socket: { handshake: { auth: Record<string, unknown> } },
   next: (err?: Error) => void,
 ): void {
   if (!isGateEnabled()) {
     next();
     return;
   }
-  const cookies = parseCookies(socket.handshake.headers.cookie);
-  if (isValidToken(cookies[COOKIE_NAME])) {
+  const token = socket.handshake.auth?.token;
+  if (isValidToken(typeof token === "string" ? token : undefined)) {
     next();
     return;
   }

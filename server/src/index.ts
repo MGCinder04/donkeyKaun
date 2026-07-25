@@ -15,15 +15,16 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN;
 const app = express();
 app.set("trust proxy", 1);
 
+// No cookies involved (see passcodeGate.ts) — auth travels as an explicit Authorization
+// header/socket handshake token instead, so this CORS setup doesn't need credentials.
 function cors(req: Request, res: Response, next: NextFunction): void {
   if (CLIENT_ORIGIN && req.headers.origin === CLIENT_ORIGIN) {
     res.setHeader("Access-Control-Allow-Origin", CLIENT_ORIGIN);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Vary", "Origin");
   }
   if (req.method === "OPTIONS") {
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.status(204).end();
     return;
   }
@@ -32,7 +33,7 @@ function cors(req: Request, res: Response, next: NextFunction): void {
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: CLIENT_ORIGIN ? { origin: CLIENT_ORIGIN, credentials: true } : { origin: "*" },
+  cors: CLIENT_ORIGIN ? { origin: CLIENT_ORIGIN } : { origin: "*" },
 });
 
 if (isGateEnabled()) {

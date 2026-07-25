@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type PropsWithChildren } from "react";
 import { API_BASE } from "../lib/config";
+import { getAuthToken, setAuthToken } from "../lib/authToken";
 import { WaitingGame } from "./WaitingGame";
 import { LockForm } from "./LockForm";
 
@@ -23,7 +24,12 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
  *  screen — the very request that checks passcode status is also the one that wakes
  *  the server, so we poll it and keep the user entertained instead of staring at
  *  Render's own cold-start page (which we never see, since the client is now a static
- *  site that loads instantly on its own). */
+ *  site that loads instantly on its own).
+ *
+ *  Auth here is a token in localStorage, sent as an explicit Authorization header —
+ *  deliberately not a cookie. The client and API are separate origins, which makes a
+ *  cookie a third-party cookie that mobile browsers block/evict regardless of its
+ *  expiry, which is exactly what caused repeated re-prompting for the passcode. */
 export function GateScreen({ children }: PropsWithChildren) {
   const [phase, setPhase] = useState<Phase>("waking");
   const [passcode, setPasscode] = useState("");
@@ -38,7 +44,9 @@ export function GateScreen({ children }: PropsWithChildren) {
 
     async function poll() {
       try {
-        const res = await fetchWithTimeout(`${API_BASE}/api/session`, { credentials: "include" }, REQUEST_TIMEOUT_MS);
+        const token = getAuthToken();
+        const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+        const res = await fetchWithTimeout(`${API_BASE}/api/session`, { headers }, REQUEST_TIMEOUT_MS);
         if (cancelledRef.current) return;
         if (res.ok) {
           const data = (await res.json()) as { unlocked: boolean };
@@ -69,13 +77,14 @@ export function GateScreen({ children }: PropsWithChildren) {
         `${API_BASE}/api/unlock`,
         {
           method: "POST",
-          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ passcode }),
         },
         REQUEST_TIMEOUT_MS,
       );
       if (res.ok) {
+        const data = (await res.json()) as { ok: true; token: string | null };
+        setAuthToken(data.token);
         setPhase("ready");
       } else if (res.status === 429) {
         setError("Too many attempts. Try again later.");
