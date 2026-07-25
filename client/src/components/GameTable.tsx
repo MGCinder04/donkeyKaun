@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { AvatarThumb } from "./AvatarThumb";
 import { Button } from "./Button";
 import { ScoreSheetModal } from "./ScoreSheetModal";
-import { gameSeatPosition } from "../rooms/gameSeatLayout";
+import { gameSeatPosition, pileSlotPosition } from "../rooms/gameSeatLayout";
+import { useDealAnimation, useTrickAnimation } from "../rooms/gameAnimations";
 import { SUIT_COLOR, SUIT_SYMBOL, cardKey, cardLabel } from "../lib/cardDisplay";
 import type { Card, PublicGameState, PublicPlayer } from "../rooms/types";
 
@@ -39,6 +41,9 @@ export function GameTable({
 
   const total = game.seatOrder.length;
   const mySeatIndex = game.seatOrder.indexOf(myDeviceId);
+
+  const { dealing, dealEvents } = useDealAnimation(game);
+  const { displayTrick, sweepWinnerSeat, sweeping } = useTrickAnimation(game);
 
   const isMyBidTurn = game.phase === "bidding" && game.bidTurnDeviceId === myDeviceId;
   const isMyPlayTurn = game.phase === "trick" && game.turnDeviceId === myDeviceId;
@@ -77,29 +82,70 @@ export function GameTable({
               {SUIT_SYMBOL[game.trumpSuit]}
             </strong>
           </div>
-          {game.phase === "trick" && (
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              {game.currentTrick.length === 0 && (
-                <p className="text-xs" style={{ color: "var(--ink-faint)" }}>
-                  Hand starting…
-                </p>
-              )}
-              {game.currentTrick.map((t) => (
-                <div key={t.deviceId} className="text-center">
-                  <div
-                    className="mb-1 flex h-14 w-10 items-center justify-center rounded-md text-base font-bold"
-                    style={{ background: "var(--card-stock)", color: SUIT_COLOR[t.card.suit], border: "1px solid var(--hairline)" }}
-                  >
-                    {cardLabel(t.card)}
-                  </div>
-                  <span className="text-[9px]" style={{ color: "var(--ink-faint)" }}>
-                    {nameFor(t.deviceId)}
-                  </span>
-                </div>
-              ))}
-            </div>
+          {game.phase === "trick" && !dealing && displayTrick.length === 0 && (
+            <p className="text-xs" style={{ color: "var(--ink-faint)" }}>
+              Hand starting…
+            </p>
           )}
         </div>
+
+        <AnimatePresence>
+          {displayTrick.map((t) => {
+            const seatIdx = game.seatOrder.indexOf(t.deviceId);
+            const seatPos = gameSeatPosition(seatIdx, mySeatIndex, total);
+            const pilePos = pileSlotPosition(seatIdx, mySeatIndex, total);
+            const isSweepTarget = sweeping && sweepWinnerSeat !== null;
+            const targetPos = isSweepTarget ? gameSeatPosition(sweepWinnerSeat, mySeatIndex, total) : pilePos;
+            return (
+              <motion.div
+                key={`${t.deviceId}-${cardKey(t.card)}`}
+                className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
+                style={{ zIndex: 5 }}
+                initial={{ top: seatPos.top, left: seatPos.left, opacity: 0, scale: 0.7 }}
+                animate={{
+                  top: targetPos.top,
+                  left: targetPos.left,
+                  opacity: isSweepTarget ? 0 : 1,
+                  scale: isSweepTarget ? 0.4 : 1,
+                }}
+                exit={{ opacity: 0, scale: 0.4 }}
+                transition={{ duration: isSweepTarget ? 0.5 : 0.35, ease: "easeOut" }}
+              >
+                <div
+                  className="flex h-14 w-10 items-center justify-center rounded-md text-base font-bold"
+                  style={{ background: "var(--card-stock)", color: SUIT_COLOR[t.card.suit], border: "1px solid var(--hairline)" }}
+                >
+                  {cardLabel(t.card)}
+                </div>
+                <span className="mt-1 text-[9px]" style={{ color: "var(--ink-faint)" }}>
+                  {nameFor(t.deviceId)}
+                </span>
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+
+        {dealing && (
+          <div className="pointer-events-none absolute inset-0">
+            {dealEvents.map((ev, i) => {
+              const pos = gameSeatPosition(ev.seatIndex, mySeatIndex, total);
+              return (
+                <motion.div
+                  key={i}
+                  className="absolute h-9 w-6 -translate-x-1/2 -translate-y-1/2 rounded-sm"
+                  style={{
+                    background: "linear-gradient(160deg, var(--gold-bright), var(--gold))",
+                    border: "1px solid var(--hairline)",
+                    zIndex: 4,
+                  }}
+                  initial={{ top: "50%", left: "50%", opacity: 0, scale: 0.5 }}
+                  animate={{ top: pos.top, left: pos.left, opacity: 1, scale: 1 }}
+                  transition={{ delay: ev.delay / 1000, duration: 0.35, ease: "easeOut" }}
+                />
+              );
+            })}
+          </div>
+        )}
 
         <button
           type="button"
@@ -114,7 +160,7 @@ export function GameTable({
           const position = gameSeatPosition(seatIndex, mySeatIndex, total);
           const player = players.find((p) => p.deviceId === id);
           const isSelf = id === myDeviceId;
-          const isTurn = id === game.turnDeviceId || id === game.bidTurnDeviceId;
+          const isTurn = !dealing && (id === game.turnDeviceId || id === game.bidTurnDeviceId);
           return (
             <div
               key={id}
@@ -158,6 +204,11 @@ export function GameTable({
               <span className="text-[10px]" style={{ color: "var(--ink-faint)" }}>
                 bid {game.bids[id] ?? "—"} · won {game.tricksWon[id] ?? 0}
               </span>
+              {!isSelf && (game.handCounts[id] ?? 0) > 0 && (
+                <span className="text-[9px]" style={{ color: "var(--ink-faint)" }}>
+                  🂠 ×{game.handCounts[id]}
+                </span>
+              )}
               {player && !player.connected && (
                 <span className="text-[9px]" style={{ color: "var(--ink-faint)" }}>
                   reconnecting…
@@ -168,18 +219,18 @@ export function GameTable({
         })}
       </div>
 
-      {game.phase === "bidding" && (
+      {!dealing && game.phase === "bidding" && (
         <p className="mb-3 text-sm" style={{ color: "var(--ink-dim)" }}>
           {isMyBidTurn ? "Your bid — how many hands will you win?" : `Waiting for ${nameFor(game.bidTurnDeviceId ?? "")} to bid…`}
         </p>
       )}
-      {game.phase === "trick" && (
+      {!dealing && game.phase === "trick" && (
         <p className="mb-3 text-sm" style={{ color: "var(--ink-dim)" }}>
           {isMyPlayTurn ? "Your turn — play a card" : `Waiting for ${nameFor(game.turnDeviceId ?? "")}…`}
         </p>
       )}
 
-      {game.phase === "bidding" && isMyBidTurn && (
+      {!dealing && game.phase === "bidding" && isMyBidTurn && (
         <div className="mb-6 flex flex-wrap justify-center gap-2">
           {Array.from({ length: maxBid + 1 }, (_, n) => n).map((n) => (
             <button
@@ -201,7 +252,7 @@ export function GameTable({
         </div>
       )}
 
-      {(game.phase === "bidding" || game.phase === "trick") && hand.length > 0 && (
+      {!dealing && (game.phase === "bidding" || game.phase === "trick") && hand.length > 0 && (
         <div className="mb-6">
           <p className="mb-2 text-xs" style={{ color: "var(--ink-faint)" }}>
             Your hand
