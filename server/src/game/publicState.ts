@@ -17,6 +17,7 @@ export interface PublicGameState {
   handCounts: Record<string, number>;
   scores: Record<string, number>;
   lastRoundSummary: RoundSummary | null;
+  roundHistory: RoundSummary[];
   donkeys: string[] | null;
 }
 
@@ -36,6 +37,7 @@ export function toPublicGameState(state: GameState): PublicGameState {
     handCounts: Object.fromEntries(Object.entries(state.hands).map(([id, hand]) => [id, hand.length])),
     scores: state.scores,
     lastRoundSummary: state.lastRoundSummary,
+    roundHistory: state.roundHistory,
     donkeys: state.donkeys,
   };
 }

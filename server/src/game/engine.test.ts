@@ -56,6 +56,7 @@ describe("bidding", () => {
       turnSeat: 0,
       scores: { p1: 0, p2: 0, p3: 0 },
       lastRoundSummary: null,
+      roundHistory: [],
       donkeys: null,
     };
   }
@@ -118,6 +119,7 @@ describe("trick play", () => {
       turnSeat: 0, // p1 leads
       scores: { p1: 0, p2: 0, p3: 0 },
       lastRoundSummary: null,
+      roundHistory: [],
       donkeys: null,
     };
   }
@@ -159,6 +161,7 @@ describe("trick play", () => {
       turnSeat: 0, // p1 leads
       scores: { p1: 0, p2: 0, p3: 0 },
       lastRoundSummary: null,
+      roundHistory: [],
       donkeys: null,
     };
 
@@ -201,6 +204,7 @@ describe("trick play", () => {
       ],
     });
     expect(state.scores).toEqual({ p1: 21, p2: 21, p3: 10 });
+    expect(state.roundHistory).toEqual([state.lastRoundSummary]); // scoresheet accumulates completed rounds
 
     // rolled into round 2
     expect(state.phase).toBe("bidding");
@@ -227,6 +231,7 @@ describe("trick play", () => {
       turnSeat: 0, // p1 leads
       scores: { p1: 100, p2: 50, p3: 50 },
       lastRoundSummary: null,
+      roundHistory: [],
       donkeys: null,
     };
 
@@ -242,6 +247,7 @@ describe("trick play", () => {
     expect(s.phase).toBe("game-end");
     expect(s.scores).toEqual({ p1: 100, p2: 60, p3: 51 });
     expect(s.donkeys).toEqual(["p3"]); // lowest cumulative score
+    expect(s.roundHistory).toEqual([s.lastRoundSummary]); // round 8 lands in the sheet too
   });
 });
 
@@ -264,6 +270,7 @@ describe("end of game", () => {
       turnSeat: 0,
       scores: { p1: 80, p2: 40, p3: 60, p4: 40, p5: 90, p6: 30 },
       lastRoundSummary: null,
+      roundHistory: [{ round: 7, trumpSuit: "C", results: [] }], // a prior game's sheet — should not carry over
       donkeys: ["p6"],
     };
   }
@@ -275,6 +282,7 @@ describe("end of game", () => {
     expect(state.dealerSeat).toBe(0);
     expect(state.trumpSuit).toBe("S");
     expect(Object.values(state.scores).every((s) => s === 0)).toBe(true);
+    expect(state.roundHistory).toEqual([]); // fresh scoresheet
     expect(state.phase).toBe("bidding");
   });
 
@@ -286,6 +294,7 @@ describe("end of game", () => {
     expect(state.dealerSeat).toBe(3); // one past the previous dealer (seat 2)
     expect(state.trumpSuit).toBe("S");
     expect(state.scores).toEqual(before.scores);
+    expect(state.roundHistory).toEqual([]); // fresh scoresheet even though scores carry over
     expect(state.phase).toBe("bidding");
   });
 });

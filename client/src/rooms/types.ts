@@ -38,6 +38,7 @@ export interface PublicGameState {
   handCounts: Record<string, number>;
   scores: Record<string, number>;
   lastRoundSummary: RoundSummary | null;
+  roundHistory: RoundSummary[];
   donkeys: string[] | null;
 }
 

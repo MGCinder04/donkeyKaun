@@ -29,6 +29,7 @@ export interface GameState {
   turnSeat: number; // seat index whose turn it is to play (trick phase)
   scores: Record<string, number>;
   lastRoundSummary: RoundSummary | null;
+  roundHistory: RoundSummary[]; // every completed round of the current 8-round game, for a full scoresheet
   donkeys: string[] | null; // set once phase === "game-end"
 }
 
@@ -60,7 +61,14 @@ function orderFrom(seatOrder: string[], from: number): string[] {
   return seatOrder.slice(start).concat(seatOrder.slice(0, start));
 }
 
-function buildRound(seatOrder: string[], round: number, dealerSeat: number, scores: Record<string, number>, rng: () => number): GameState {
+function buildRound(
+  seatOrder: string[],
+  round: number,
+  dealerSeat: number,
+  scores: Record<string, number>,
+  rng: () => number,
+  roundHistory: RoundSummary[] = [],
+): GameState {
   const cardsThisRound = 9 - round;
   const trumpSuit = TRUMP_ROTATION[(round - 1) % TRUMP_ROTATION.length];
   const bidOrder = orderFrom(seatOrder, dealerSeat + 1);
@@ -86,6 +94,7 @@ function buildRound(seatOrder: string[], round: number, dealerSeat: number, scor
     turnSeat: seatOrder.indexOf(bidOrder[0]),
     scores,
     lastRoundSummary: null,
+    roundHistory,
     donkeys: null,
   };
 }
@@ -154,16 +163,24 @@ function finishRound(state: GameState, rng: () => number): GameState {
   const scores = { ...state.scores };
   for (const r of results) scores[r.deviceId] = (scores[r.deviceId] ?? 0) + r.roundScore;
   const lastRoundSummary: RoundSummary = { round: state.round, trumpSuit: state.trumpSuit, results };
+  const roundHistory = [...state.roundHistory, lastRoundSummary];
 
   if (state.round >= 8) {
     const min = Math.min(...Object.values(scores));
     const donkeys = Object.entries(scores)
       .filter(([, s]) => s === min)
       .map(([id]) => id);
-    return { ...state, phase: "game-end", scores, lastRoundSummary, donkeys };
+    return { ...state, phase: "game-end", scores, lastRoundSummary, roundHistory, donkeys };
   }
 
-  const next = buildRound(state.seatOrder, state.round + 1, (state.dealerSeat + 1) % state.seatOrder.length, scores, rng);
+  const next = buildRound(
+    state.seatOrder,
+    state.round + 1,
+    (state.dealerSeat + 1) % state.seatOrder.length,
+    scores,
+    rng,
+    roundHistory,
+  );
   return { ...next, lastRoundSummary };
 }
 
