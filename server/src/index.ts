@@ -12,6 +12,7 @@ import {
 } from "./security/passcodeGate.js";
 import { registerRoomHandlers } from "./rooms/socketHandlers.js";
 import { sweepStaleRooms } from "./rooms/store.js";
+import { iceServersHandler } from "./voice/iceServers.js";
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 // The client is a separate static-hosted service in production (so it loads instantly
@@ -58,6 +59,7 @@ if (isGateEnabled()) {
 app.use(cors);
 app.get("/api/session", sessionHandler);
 app.post("/api/unlock", express.json({ limit: "1kb" }), unlockHandler);
+app.get("/api/voice/ice", iceServersHandler);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });

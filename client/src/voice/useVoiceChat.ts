@@ -1,73 +1,98 @@
 import { useEffect, useRef, useState } from "react";
 import * as voice from "./webrtcEngine";
+import type { PeerVoiceStatus } from "./webrtcEngine";
 
-const SPEAKING_THRESHOLD = 14; // empirical — byte-frequency average, 0-255 scale
-const POLL_MS = 150;
+const SPEAKING_THRESHOLD = 14;
+const POLL_MS = 200;
 
 export interface VoiceChatState {
   micEnabled: boolean;
   micPending: boolean;
   micError: string | null;
-  muted: boolean;
+  micMuted: boolean;
+  listeningMuted: boolean;
+  playbackBlocked: boolean;
+  turnAvailable: boolean;
+  connectedPeerCount: number;
+  peerCount: number;
+  peerStatuses: Map<string, PeerVoiceStatus>;
+  mutedPeerIds: Set<string>;
   speakingDeviceIds: Set<string>;
   enableMic: () => void;
-  toggleMute: () => void;
+  toggleMicMute: () => void;
+  toggleListeningMute: () => void;
+  togglePeerMute: (deviceId: string) => void;
+  resumeAudio: () => void;
 }
 
-/** Voice chat is entirely opt-in: nothing connects (no mic prompt, no peer connections)
- *  until the player explicitly enables it. `peerDeviceIds` should be every other
- *  currently-connected player in the room — this hook diffs it against the previous
- *  render to connect new peers and tear down ones who've left. */
+function sameSet(left: Set<string>, right: Set<string>): boolean {
+  return left.size === right.size && [...left].every((id) => right.has(id));
+}
+
+function sameStatusMap(left: Map<string, PeerVoiceStatus>, right: Map<string, PeerVoiceStatus>): boolean {
+  return left.size === right.size && [...left].every(([id, status]) => right.get(id) === status);
+}
+
+/**
+ * Listening starts automatically and never requests microphone permission. Turning on
+ * the microphone only controls whether this player also transmits. Every connected room
+ * member gets a pre-negotiated receive channel, so click order cannot cause one-way audio.
+ */
 export function useVoiceChat(roomCode: string, myDeviceId: string, peerDeviceIds: string[]): VoiceChatState {
+  const [sessionReady, setSessionReady] = useState(false);
   const [micEnabled, setMicEnabled] = useState(false);
   const [micPending, setMicPending] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
-  const [muted, setMuted] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
+  const [listeningMuted, setListeningMuted] = useState(false);
+  const [playbackBlocked, setPlaybackBlocked] = useState(false);
+  const [turnAvailable, setTurnAvailable] = useState(false);
+  const [peerStatuses, setPeerStatuses] = useState<Map<string, PeerVoiceStatus>>(new Map());
+  const [mutedPeerIds, setMutedPeerIds] = useState<Set<string>>(new Set());
   const [speakingDeviceIds, setSpeakingDeviceIds] = useState<Set<string>>(new Set());
   const micEnabledRef = useRef(micEnabled);
-  const prevPeersRef = useRef<Set<string>>(new Set());
+  const latestPeersRef = useRef(peerDeviceIds);
   micEnabledRef.current = micEnabled;
+  latestPeersRef.current = peerDeviceIds;
 
   useEffect(() => {
-    voice.initVoiceSession(roomCode, myDeviceId);
+    let cancelled = false;
+    setSessionReady(false);
+    void voice.initVoiceSession(roomCode, myDeviceId).then(() => {
+      if (cancelled) return;
+      voice.setDesiredPeers(latestPeersRef.current);
+      setSessionReady(true);
+    });
+    return () => {
+      cancelled = true;
+      voice.teardownAll();
+    };
   }, [roomCode, myDeviceId]);
 
+  const peerKey = [...peerDeviceIds].sort().join(",");
   useEffect(() => {
-    if (!micEnabled) return;
-    const next = new Set(peerDeviceIds);
-    for (const id of next) {
-      if (!prevPeersRef.current.has(id)) voice.connectPeer(id);
-    }
-    for (const id of prevPeersRef.current) {
-      if (!next.has(id)) voice.disconnectPeer(id);
-    }
-    prevPeersRef.current = next;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [micEnabled, peerDeviceIds.join(",")]);
-
-  useEffect(
-    () => () => {
-      voice.teardownAll();
-      prevPeersRef.current = new Set();
-    },
-    [roomCode],
-  );
+    if (sessionReady) voice.setDesiredPeers(latestPeersRef.current);
+  }, [sessionReady, peerKey]);
 
   useEffect(() => {
-    if (!micEnabled) return;
-    const timer = setInterval(() => {
-      const levels = voice.getSpeakingLevels();
-      setSpeakingDeviceIds((prev) => {
-        const next = new Set<string>();
-        for (const [id, level] of levels) {
-          if (level > SPEAKING_THRESHOLD) next.add(id);
-        }
-        if (next.size === prev.size && [...next].every((id) => prev.has(id))) return prev;
-        return next;
-      });
-    }, POLL_MS);
+    if (!sessionReady) return;
+    const update = () => {
+      const snapshot = voice.getSnapshot();
+      const speaking = new Set<string>();
+      for (const [id, level] of snapshot.speakingLevels) {
+        if (level > SPEAKING_THRESHOLD) speaking.add(id);
+      }
+      setSpeakingDeviceIds((previous) => (sameSet(previous, speaking) ? previous : speaking));
+      setPeerStatuses((previous) =>
+        sameStatusMap(previous, snapshot.peerStatuses) ? previous : snapshot.peerStatuses,
+      );
+      setPlaybackBlocked(snapshot.playbackBlocked);
+      setTurnAvailable(snapshot.turnAvailable);
+    };
+    update();
+    const timer = setInterval(update, POLL_MS);
     return () => clearInterval(timer);
-  }, [micEnabled]);
+  }, [sessionReady]);
 
   function enableMic() {
     if (micEnabledRef.current || micPending) return;
@@ -78,8 +103,6 @@ export function useVoiceChat(roomCode: string, myDeviceId: string, peerDeviceIds
       .then(() => {
         setMicEnabled(true);
         setMicPending(false);
-        for (const id of peerDeviceIds) voice.connectPeer(id);
-        prevPeersRef.current = new Set(peerDeviceIds);
       })
       .catch(() => {
         setMicPending(false);
@@ -87,13 +110,56 @@ export function useVoiceChat(roomCode: string, myDeviceId: string, peerDeviceIds
       });
   }
 
-  function toggleMute() {
-    setMuted((prev) => {
-      const next = !prev;
-      voice.setMuted(next);
+  function toggleMicMute() {
+    setMicMuted((previous) => {
+      const next = !previous;
+      voice.setMicMuted(next);
       return next;
     });
   }
 
-  return { micEnabled, micPending, micError, muted, speakingDeviceIds, enableMic, toggleMute };
+  function toggleListeningMute() {
+    setListeningMuted((previous) => {
+      const next = !previous;
+      voice.setListeningMuted(next);
+      return next;
+    });
+  }
+
+  function togglePeerMute(deviceId: string) {
+    setMutedPeerIds((previous) => {
+      const next = new Set(previous);
+      const muted = !next.has(deviceId);
+      if (muted) next.add(deviceId);
+      else next.delete(deviceId);
+      voice.setPeerMuted(deviceId, muted);
+      return next;
+    });
+  }
+
+  function resumeAudio() {
+    void voice.resumeAudioPlayback().then(() => setPlaybackBlocked(voice.getSnapshot().playbackBlocked));
+  }
+
+  const connectedPeerCount = [...peerStatuses.values()].filter((status) => status === "connected").length;
+
+  return {
+    micEnabled,
+    micPending,
+    micError,
+    micMuted,
+    listeningMuted,
+    playbackBlocked,
+    turnAvailable,
+    connectedPeerCount,
+    peerCount: peerDeviceIds.length,
+    peerStatuses,
+    mutedPeerIds,
+    speakingDeviceIds,
+    enableMic,
+    toggleMicMute,
+    toggleListeningMute,
+    togglePeerMute,
+    resumeAudio,
+  };
 }

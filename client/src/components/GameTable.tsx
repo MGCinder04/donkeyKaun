@@ -28,6 +28,8 @@ interface GameTableProps {
   onContinue: () => void;
   onExit: () => void;
   speakingDeviceIds?: Set<string>;
+  mutedVoiceDeviceIds?: Set<string>;
+  onToggleVoiceMute?: (deviceId: string) => void;
 }
 
 export function GameTable({
@@ -43,6 +45,8 @@ export function GameTable({
   onContinue,
   onExit,
   speakingDeviceIds,
+  mutedVoiceDeviceIds,
+  onToggleVoiceMute,
 }: GameTableProps) {
   const [showScoreSheet, setShowScoreSheet] = useState(false);
   const nameFor = (id: string) => players.find((p) => p.deviceId === id)?.name ?? "?";
@@ -297,6 +301,23 @@ export function GameTable({
                   >
                     D
                   </span>
+                )}
+                {!isSelf && onToggleVoiceMute && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleVoiceMute(id)}
+                    aria-label={`${mutedVoiceDeviceIds?.has(id) ? "Unmute" : "Mute"} ${nameFor(id)}`}
+                    aria-pressed={mutedVoiceDeviceIds?.has(id) ?? false}
+                    title={`${mutedVoiceDeviceIds?.has(id) ? "Unmute" : "Mute"} ${nameFor(id)} on this device`}
+                    className="absolute -left-1 -bottom-1 flex h-5 w-5 items-center justify-center rounded-full text-[10px]"
+                    style={{
+                      border: "1px solid var(--hairline)",
+                      background: mutedVoiceDeviceIds?.has(id) ? "var(--brick)" : "var(--ground-raised-2)",
+                      color: "var(--ink)",
+                    }}
+                  >
+                    {mutedVoiceDeviceIds?.has(id) ? "🔇" : "🔊"}
+                  </button>
                 )}
               </motion.div>
               <span

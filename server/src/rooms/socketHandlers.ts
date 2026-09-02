@@ -48,6 +48,26 @@ function isCard(value: unknown): value is Card {
   return typeof v.suit === "string" && typeof v.rank === "string";
 }
 
+function isVoiceSignal(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const signal = value as Record<string, unknown>;
+  if (signal.type === "description") {
+    if (typeof signal.description !== "object" || signal.description === null) return false;
+    const description = signal.description as Record<string, unknown>;
+    return (
+      (description.type === "offer" || description.type === "answer") &&
+      typeof description.sdp === "string" &&
+      description.sdp.length <= 100_000
+    );
+  }
+  if (signal.type === "ice") {
+    if (typeof signal.candidate !== "object" || signal.candidate === null) return false;
+    const candidate = signal.candidate as Record<string, unknown>;
+    return typeof candidate.candidate === "string" && candidate.candidate.length <= 4_096;
+  }
+  return false;
+}
+
 function broadcastRoom(io: Server, code: string): void {
   const room = findRoom(code);
   if (!room) return;
@@ -228,14 +248,14 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
   });
 
   // WebRTC signaling relay for voice chat: purely a pass-through between two players
-  // already confirmed to be in the same room. The server never looks at (or could make
-  // sense of) the SDP/ICE payload itself — offer, answer, and ICE candidate messages all
-  // flow through this one event, distinguished by their own `type` field on the client.
+  // already confirmed to be in the same room. The server only validates shape/size and
+  // forwards the opaque SDP/ICE payload; media remains peer-to-peer (or TURN-relayed).
   socket.on("voice:signal", (payload: RoomPayload) => {
     if (
       typeof payload?.code !== "string" ||
       typeof payload?.deviceId !== "string" ||
-      typeof payload?.targetDeviceId !== "string"
+      typeof payload?.targetDeviceId !== "string" ||
+      !isVoiceSignal(payload?.data)
     ) {
       return;
     }
@@ -243,7 +263,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     if (!room) return;
     const sender = room.players.find((p) => p.deviceId === payload.deviceId);
     const target = room.players.find((p) => p.deviceId === payload.targetDeviceId);
-    if (!sender || !target?.socketId) return;
+    if (!sender || sender.socketId !== socket.id || !target?.socketId) return;
     io.to(target.socketId).emit("voice:signal", { deviceId: payload.deviceId, data: payload.data });
   });
 

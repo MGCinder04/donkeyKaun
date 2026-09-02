@@ -227,6 +227,10 @@ export function Room() {
                     player && !isSelf && isHost ? () => handleKick(player.deviceId, player.name) : undefined
                   }
                   speaking={player ? voiceState.speakingDeviceIds.has(player.deviceId) : false}
+                  voiceMuted={player ? voiceState.mutedPeerIds.has(player.deviceId) : false}
+                  onToggleVoiceMute={
+                    player && !isSelf ? () => voiceState.togglePeerMute(player.deviceId) : undefined
+                  }
                 />
               );
             })}
@@ -271,6 +275,8 @@ export function Room() {
           onContinue={() => continueGame(roomCode, identity.deviceId)}
           onExit={() => exitGame(roomCode, identity.deviceId)}
           speakingDeviceIds={voiceState.speakingDeviceIds}
+          mutedVoiceDeviceIds={voiceState.mutedPeerIds}
+          onToggleVoiceMute={voiceState.togglePeerMute}
         />
       ) : isHost ? (
         <div className="text-center">

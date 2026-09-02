@@ -69,8 +69,8 @@ against when something in the engine looks wrong. **Flag anything below that's o
 - Circular table layout, dealing animation, trick-to-winner animation, live scoreboard,
   current trump + round indicators.
 - End-of-round and end-of-game score reveal, with new game / continue / exit choice.
-- Voice chat: mute/unmute per player, speaking indicator, WebRTC mesh (no media
-  server cost).
+- Voice chat: listen automatically, opt-in microphone, mute all/per player, speaking
+  indicators, and a WebRTC mesh with secure TURN fallback.
 - Mobile + desktop responsive layouts, tested on both.
 - Reconnect handling (phone locks, wifi drops mid-game).
 
@@ -148,11 +148,13 @@ Each milestone ends with a checklist below and a demo for live testing before me
       verified to clear automatically once the player's socket comes back
 
 ### M4 — Voice Chat ✅
-- [x] WebRTC mesh signaling over Socket.io (pure relay, server never parses SDP/ICE)
-- [x] Mute/unmute UI, speaking indicators (per-seat pulsing ring, Web Audio analyser)
-- [x] STUN only — no TURN. **Known limitation:** voice can fail to connect for players
-      behind strict/symmetric NATs (no budget for hosted TURN credentials). Everything
-      else (game, chat-free play) is unaffected if voice fails.
+- [x] WebRTC mesh signaling over Socket.io (the server validates message shape, room
+      membership, and sender identity before relaying encrypted peer negotiation)
+- [x] Listen automatically; microphone remains opt-in and requires browser permission
+- [x] Independent microphone mute, mute-all, per-player local mute, speaking indicators,
+      connection status, and autoplay-recovery control
+- [x] Cloudflare STUN by default plus optional Realtime TURN fallback. Permanent TURN
+      credentials stay on the API server; browsers receive only short-lived credentials.
 
 ### M5 — Polish ✅
 - [x] Full mobile responsiveness pass (390px viewport tested; fixed two overlap bugs —
@@ -204,8 +206,8 @@ latest, or just run it locally per the README.
 
 ## 7. Security notes
 
-- No secrets exist yet (no API keys, no DB). `.env` is gitignored regardless, so if we
-  add any (e.g. a TURN server credential later), it never gets committed.
+- Runtime secrets (site passcode, session secret, and optional TURN key) live only in
+  Render's API-service environment. `.env` is gitignored and tracked examples stay empty.
 - No accounts/passwords in scope for v1, which removes a whole class of risk.
 - Since the repo is public: before every merge to `main`, I'll re-check `git diff` for
   anything that looks like a key, token, or personal data before it goes up.

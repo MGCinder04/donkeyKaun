@@ -33,3 +33,25 @@ client).
 npm run build:server && npm run start --workspace server   # run the API locally as it runs in prod
 npm run build:client                                        # produces client/dist to serve statically
 ```
+
+## Reliable voice chat (optional TURN setup)
+
+Direct WebRTC audio uses Cloudflare's free STUN endpoint without any configuration.
+For reliable calls across mobile carriers, VPNs, and restrictive routers, create a
+Cloudflare Realtime TURN key and add these **only** to the Render API Web Service:
+
+```text
+CLOUDFLARE_TURN_KEY_ID=<the TURN key ID/UID>
+CLOUDFLARE_TURN_KEY_API_TOKEN=<the permanent TURN key secret>
+```
+
+In Cloudflare: open **Realtime** → **TURN**, create a TURN key (for example,
+`donkey-kaun-production`), then copy its ID and secret. In Render: open the
+`donkey-kaun-api` Web Service → **Environment**, add the two values above, save, and
+redeploy. Do not put either real value in `.env.example`, `render.yaml`, client-side
+environment variables, or GitHub.
+
+The API exchanges the permanent secret for short-lived browser credentials at
+`GET /api/voice/ice`. The endpoint follows the site's passcode gate, and the client
+automatically falls back to direct STUN-only audio if TURN is not configured or is
+temporarily unavailable.

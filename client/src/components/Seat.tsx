@@ -9,9 +9,20 @@ interface SeatProps {
   onClickSelf?: () => void;
   onKick?: () => void;
   speaking?: boolean;
+  voiceMuted?: boolean;
+  onToggleVoiceMute?: () => void;
 }
 
-export function Seat({ player, position, isSelf, onClickSelf, onKick, speaking }: SeatProps) {
+export function Seat({
+  player,
+  position,
+  isSelf,
+  onClickSelf,
+  onKick,
+  speaking,
+  voiceMuted,
+  onToggleVoiceMute,
+}: SeatProps) {
   const style = { top: position.top, left: position.left, transform: "translate(-50%, -50%)" };
 
   if (!player) {
@@ -66,6 +77,26 @@ export function Seat({ player, position, isSelf, onClickSelf, onKick, speaking }
             style={{ background: "var(--brick)", color: "var(--ink)" }}
           >
             ✕
+          </button>
+        )}
+        {onToggleVoiceMute && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleVoiceMute();
+            }}
+            aria-label={`${voiceMuted ? "Unmute" : "Mute"} ${player.name}`}
+            aria-pressed={voiceMuted}
+            title={`${voiceMuted ? "Unmute" : "Mute"} ${player.name} on this device`}
+            className="absolute -right-1 -bottom-1 flex h-5 w-5 items-center justify-center rounded-full text-[10px]"
+            style={{
+              border: "1px solid var(--hairline)",
+              background: voiceMuted ? "var(--brick)" : "var(--ground-raised-2)",
+              color: "var(--ink)",
+            }}
+          >
+            {voiceMuted ? "🔇" : "🔊"}
           </button>
         )}
       </div>
