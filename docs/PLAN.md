@@ -83,7 +83,7 @@ against when something in the engine looks wrong. **Flag anything below that's o
 | Backend | Node.js + Express + Socket.io + TypeScript |
 | Identity | Browser-local device ID (`localStorage`), no accounts/passwords |
 | Voice | WebRTC mesh, signaling over the existing Socket.io connection |
-| Hosting | Single Render free Web Service serving both the API/sockets and the built client |
+| Hosting | Render Static Site (`donkeykaunloader`) + free API Web Service (`donkeykaun`) |
 | Repo | npm workspaces monorepo (`client/`, `server/`) |
 
 ## 4. Repo structure
@@ -168,12 +168,17 @@ Each milestone ends with a checklist below and a demo for live testing before me
 ### M6 — Deploy Hardening
 - [x] Secrets audit (nothing sensitive in the repo; `.env*` gitignored, `render.yaml`
       keeps real values out via `sync: false`)
-- [ ] Render production deploy — not done by design; user is testing manually before
-      merging `work` → `main`
+- [x] Render production deployment configured as a static frontend plus API Web Service;
+      both auto-deploy from `main`
 - [x] Load test with 6 concurrent connections
 - [x] Final security pass — fixed a real passcode-gate bypass (hardcoded fallback secret
       was derivable from source if `SESSION_SECRET` was ever left unset), an unbounded
       rate-limiter memory leak, and switched room-code generation to a CSPRNG
+- [x] Durable room recovery through Upstash Redis (24-hour expiry), including safe
+      free-server restarts without exposing hands or raw resume credentials
+- [x] Secure same-device refresh/QR takeover with rotating resume credentials, bounded
+      socket acknowledgements, authoritative reconnect state, and automatic voice-peer
+      rebuilding after membership is restored
 
 ## 6. Git workflow (for you to run day-to-day)
 

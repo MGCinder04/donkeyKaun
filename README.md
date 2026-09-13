@@ -29,6 +29,11 @@ screen while it wakes back up, instead of Render's default cold-start page). See
 (`CLIENT_ORIGIN`/`SITE_PASSCODE`/`SESSION_SECRET` on the server, `VITE_API_URL` on the
 client).
 
+For room recovery across free-server restarts, add `UPSTASH_REDIS_REST_URL` and
+`UPSTASH_REDIS_REST_TOKEN` to the API Web Service only. Room snapshots expire after
+24 hours by default (`ROOM_STATE_TTL_SECONDS=86400`). Raw resume tokens and all voice
+media remain browser-only; Redis receives only token hashes and server-owned game state.
+
 ```
 npm run build:server && npm run start --workspace server   # run the API locally as it runs in prod
 npm run build:client                                        # produces client/dist to serve statically
@@ -50,7 +55,7 @@ TURN_DAILY_CREDENTIAL_LIMIT=120
 
 In Cloudflare: open **Realtime** → **TURN**, create a TURN key (for example,
 `donkey-kaun-production`), then copy its ID and secret. In Render: open the
-`donkey-kaun-api` Web Service → **Environment**, add the two values above, save, and
+`donkeykaun` Web Service → **Environment**, add the two values above, save, and
 redeploy. Do not put either real value in `.env.example`, `render.yaml`, client-side
 environment variables, or GitHub. Keep `TURN_ENABLED=false` until the production gate
 has been checked; changing it to `true` is the explicit paid-service switch.

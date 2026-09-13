@@ -16,7 +16,9 @@ import {
   newGame,
   onHand,
   onKicked,
+  onMembershipResult,
   onRoomExited,
+  onRoomReplaced,
   onRoomState,
   placeBid,
   playCard,
@@ -30,7 +32,7 @@ import type { Card, PublicRoom } from "../rooms/types";
 const SEAT_COUNT = 6;
 const MIN_TO_START = 2;
 
-type ViewState = "joining" | "joined" | "error" | "kicked" | "exited";
+type ViewState = "joining" | "joined" | "error" | "kicked" | "exited" | "replaced";
 
 export function Room() {
   const navigate = useNavigate();
@@ -40,6 +42,7 @@ export function Room() {
 
   const [view, setView] = useState<ViewState>("joining");
   const [errorMessage, setErrorMessage] = useState("");
+  const [retryable, setRetryable] = useState(false);
   const [room, setRoom] = useState<PublicRoom | null>(null);
   const [inviteUrl] = useState(() => `${window.location.origin}/room/${roomCode}`);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -64,6 +67,7 @@ export function Room() {
         setView("joined");
       } else {
         setErrorMessage(ROOM_ERROR_MESSAGES[result.error] ?? "Couldn't join that room.");
+        setRetryable(result.error === "network" || result.error === "timeout" || result.error === "session_conflict");
         setView("error");
       }
     });
@@ -75,6 +79,23 @@ export function Room() {
 
   useEffect(() => onKicked((kickedCode) => {
     if (kickedCode === roomCode) setView("kicked");
+  }), [roomCode]);
+
+  useEffect(() => onRoomReplaced((replacedCode) => {
+    if (replacedCode === roomCode) setView("replaced");
+  }), [roomCode]);
+
+  useEffect(() => onMembershipResult(({ code: restoredCode, result }) => {
+    if (restoredCode !== roomCode) return;
+    if (result.ok) {
+      setRoom(result.value);
+      setView("joined");
+      return;
+    }
+    if (result.error === "network" || result.error === "timeout") return;
+    setErrorMessage(ROOM_ERROR_MESSAGES[result.error] ?? "Couldn't restore this room.");
+    setRetryable(result.error === "session_conflict");
+    setView("error");
   }), [roomCode]);
 
   useEffect(() => onRoomExited((exitedCode) => {
@@ -122,6 +143,21 @@ export function Room() {
     navigate("/");
   }
 
+  async function handleRetryJoin() {
+    if (!identity.avatar) return;
+    setView("joining");
+    setErrorMessage("");
+    const result = await joinRoom(roomCode, identity.name, identity.avatar, identity.deviceId);
+    if (result.ok) {
+      setRoom(result.value);
+      setView("joined");
+    } else {
+      setErrorMessage(ROOM_ERROR_MESSAGES[result.error] ?? "Couldn't join that room.");
+      setRetryable(result.error === "network" || result.error === "timeout" || result.error === "session_conflict");
+      setView("error");
+    }
+  }
+
   if (view === "joining") {
     return (
       <section className="mx-auto max-w-md px-6 pt-24 pb-16 text-center">
@@ -162,6 +198,21 @@ export function Room() {
     );
   }
 
+  if (view === "replaced") {
+    return (
+      <section className="mx-auto max-w-md px-6 pt-24 pb-16 text-center">
+        <h2 className="text-2xl font-bold sm:text-3xl">Room moved to another tab</h2>
+        <p className="mt-3" style={{ color: "var(--ink-dim)" }}>
+          This player was opened somewhere else, so this older connection was closed safely.
+        </p>
+        <div className="mt-8 flex justify-center gap-4">
+          <Button variant="ghost" onClick={() => navigate("/")}>Back home</Button>
+          <Button variant="primary" onClick={handleRetryJoin}>Use this tab instead</Button>
+        </div>
+      </section>
+    );
+  }
+
   if (view === "error" || !room) {
     return (
       <section className="mx-auto max-w-md px-6 pt-24 pb-16 text-center">
@@ -173,6 +224,11 @@ export function Room() {
           <Button variant="ghost" onClick={() => navigate("/")}>
             Back home
           </Button>
+          {retryable && (
+            <Button variant="primary" onClick={handleRetryJoin}>
+              Try again
+            </Button>
+          )}
         </div>
       </section>
     );

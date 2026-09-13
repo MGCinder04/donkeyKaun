@@ -47,7 +47,10 @@ let listeningMuted = false;
 let signalHandler: ((payload: { deviceId: string; data: VoiceSignalPayload }) => void) | null = null;
 let socketConnectHandler: (() => void) | null = null;
 let socketDisconnectHandler: (() => void) | null = null;
+let membershipReadyHandler: ((payload: { code: string }) => void) | null = null;
+let peerResetHandler: ((payload: { deviceId: string }) => void) | null = null;
 let turnRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let membershipReadyPending = false;
 const earlySignals: Array<{ deviceId: string; data: VoiceSignalPayload }> = [];
 
 const desiredPeers = new Set<string>();
@@ -61,7 +64,17 @@ function ensureAudioContext(): AudioContext {
 }
 
 function sendSignal(targetDeviceId: string, data: VoiceSignalPayload): void {
-  getSocket().emit("voice:signal", { code: roomCode, deviceId: myDeviceId, targetDeviceId, data });
+  getSocket()
+    .timeout(5_000)
+    .emit(
+      "voice:signal",
+      { code: roomCode, deviceId: myDeviceId, targetDeviceId, data },
+      (error: Error | null, response: { ok: boolean } | undefined) => {
+        if (!error && response?.ok) return;
+        const entry = peers.get(targetDeviceId);
+        if (entry) scheduleIceRestart(targetDeviceId, entry);
+      },
+    );
 }
 
 function attachAnalyser(stream: MediaStream): { analyser: AnalyserNode; dataArray: Uint8Array<ArrayBuffer> } | null {
@@ -352,6 +365,12 @@ function reconcilePeers(): void {
   for (const id of desiredPeers) void connectPeer(id);
 }
 
+function restoreVoiceAfterMembership(): void {
+  membershipReadyPending = false;
+  closeAllPeers();
+  void refreshIceServers().finally(reconcilePeers);
+}
+
 export async function initVoiceSession(code: string, deviceId: string): Promise<void> {
   teardownAll();
   const generation = sessionGeneration;
@@ -362,12 +381,23 @@ export async function initVoiceSession(code: string, deviceId: string): Promise<
   signalHandler = (payload) => void handleSignal(payload.deviceId, payload.data);
   socketConnectHandler = () => {
     closeAllPeers();
-    reconcilePeers();
   };
   socketDisconnectHandler = () => closeAllPeers();
+  membershipReadyHandler = (payload) => {
+    if (payload.code !== roomCode) return;
+    membershipReadyPending = true;
+    if (sessionReady) restoreVoiceAfterMembership();
+  };
+  peerResetHandler = (payload) => {
+    if (payload.deviceId === myDeviceId) return;
+    disconnectPeer(payload.deviceId);
+    if (sessionReady && desiredPeers.has(payload.deviceId)) void connectPeer(payload.deviceId);
+  };
   socket.on("voice:signal", signalHandler);
   socket.on("connect", socketConnectHandler);
   socket.on("disconnect", socketDisconnectHandler);
+  socket.on("room:membership-ready", membershipReadyHandler);
+  socket.on("voice:peer-reset", peerResetHandler);
 
   const config = await requestIceServers();
   if (generation !== sessionGeneration) return;
@@ -375,7 +405,8 @@ export async function initVoiceSession(code: string, deviceId: string): Promise<
   turnAvailable = config.turnAvailable;
   if (turnAvailable) scheduleTurnRefresh();
   sessionReady = true;
-  reconcilePeers();
+  if (membershipReadyPending) restoreVoiceAfterMembership();
+  else reconcilePeers();
   for (const pending of earlySignals.splice(0)) {
     await handleSignal(pending.deviceId, pending.data);
   }
@@ -468,9 +499,13 @@ export function teardownAll(): void {
   if (signalHandler) socket.off("voice:signal", signalHandler);
   if (socketConnectHandler) socket.off("connect", socketConnectHandler);
   if (socketDisconnectHandler) socket.off("disconnect", socketDisconnectHandler);
+  if (membershipReadyHandler) socket.off("room:membership-ready", membershipReadyHandler);
+  if (peerResetHandler) socket.off("voice:peer-reset", peerResetHandler);
   signalHandler = null;
   socketConnectHandler = null;
   socketDisconnectHandler = null;
+  membershipReadyHandler = null;
+  peerResetHandler = null;
   if (turnRefreshTimer) clearTimeout(turnRefreshTimer);
   turnRefreshTimer = null;
   closeAllPeers();
@@ -485,4 +520,5 @@ export function teardownAll(): void {
   localDataArray = null;
   playbackBlocked = false;
   listeningMuted = false;
+  membershipReadyPending = false;
 }

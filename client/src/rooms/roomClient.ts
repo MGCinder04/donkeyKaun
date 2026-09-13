@@ -1,10 +1,53 @@
 import { getSocket } from "./socket";
 import type { AvatarChoice } from "../identity/useIdentity";
-import type { Card, Envelope, PrivateHand, PublicRoom } from "./types";
+import {
+  clearMembershipCredentials,
+  commitMembershipCredentials,
+  createInitialMembershipTokens,
+  prepareMembershipCredentials,
+  storeCreatedMembership,
+} from "./membershipCredentials";
+import type { Card, ClientRoomErrorCode, Envelope, PrivateHand, PublicRoom } from "./types";
 
-function request<T>(event: string, payload: Record<string, unknown>): Promise<Envelope<T>> {
+const CONNECT_TIMEOUT_MS = 12_000;
+const ACK_TIMEOUT_MS = 10_000;
+const REJOIN_RETRY_MS = 2_000;
+
+function connectionError(message: string): ClientRoomErrorCode {
+  return message.toLowerCase().includes("unauthorized") ? "unauthorized" : "network";
+}
+
+function waitForConnection(): Promise<ClientRoomErrorCode | null> {
+  const socket = getSocket();
+  if (socket.connected) return Promise.resolve(null);
   return new Promise((resolve) => {
-    getSocket().emit(event, payload, (response: Envelope<T>) => resolve(response));
+    const finish = (error: ClientRoomErrorCode | null) => {
+      clearTimeout(timer);
+      socket.off("connect", onConnect);
+      socket.off("connect_error", onError);
+      resolve(error);
+    };
+    const onConnect = () => finish(null);
+    const onError = (error: Error) => finish(connectionError(error.message));
+    const timer = setTimeout(() => finish("timeout"), CONNECT_TIMEOUT_MS);
+    socket.once("connect", onConnect);
+    socket.once("connect_error", onError);
+  });
+}
+
+async function request<T>(event: string, payload: Record<string, unknown>): Promise<Envelope<T>> {
+  const connectionFailure = await waitForConnection();
+  if (connectionFailure) return { ok: false, error: connectionFailure };
+  return new Promise((resolve) => {
+    getSocket()
+      .timeout(ACK_TIMEOUT_MS)
+      .emit(event, payload, (error: Error | null, response: Envelope<T> | undefined) => {
+        if (error || !response) {
+          resolve({ ok: false, error: "timeout" });
+          return;
+        }
+        resolve(response);
+      });
   });
 }
 
@@ -15,29 +58,96 @@ interface Membership {
   deviceId: string;
 }
 
-let activeMembership: Membership | null = null;
+interface JoinWireValue {
+  room: PublicRoom;
+}
 
-// A socket reconnect (network blip, laptop sleep/wake, a browser-discarded tab coming
-// back) gets a new socket.id and drops out of every Socket.IO room it was in — none of
-// which necessarily remounts the Room page that triggered the original join. Without
-// this, the server keeps showing that player as permanently "reconnecting" until they
-// navigate back into the room. Re-announcing on every connect keeps it accurate.
+interface MembershipResultEvent {
+  code: string;
+  result: Envelope<PublicRoom>;
+}
+
+let activeMembership: Membership | null = null;
+let joinInFlight: Promise<Envelope<PublicRoom>> | null = null;
+let rejoinTimer: ReturnType<typeof setTimeout> | null = null;
+const membershipListeners = new Set<(event: MembershipResultEvent) => void>();
+
+function isTransient(error: ClientRoomErrorCode): boolean {
+  return error === "network" || error === "timeout";
+}
+
+function notifyMembership(event: MembershipResultEvent): void {
+  for (const listener of membershipListeners) listener(event);
+}
+
+function scheduleRejoin(): void {
+  if (rejoinTimer || !activeMembership) return;
+  rejoinTimer = setTimeout(() => {
+    rejoinTimer = null;
+    if (activeMembership && getSocket().connected) void performJoin(activeMembership, true);
+  }, REJOIN_RETRY_MS);
+}
+
+async function performJoin(membership: Membership, notify: boolean): Promise<Envelope<PublicRoom>> {
+  if (joinInFlight) return joinInFlight;
+  const credentials = prepareMembershipCredentials(membership.code);
+  joinInFlight = request<JoinWireValue>("room:join", {
+    ...membership,
+    resumeToken: credentials.current,
+    nextResumeToken: credentials.pending,
+  })
+    .then((wireResult): Envelope<PublicRoom> => {
+      if (wireResult.ok) {
+        commitMembershipCredentials(membership.code);
+        activeMembership = membership;
+        return { ok: true, value: wireResult.value.room };
+      }
+      if (isTransient(wireResult.error)) scheduleRejoin();
+      return wireResult;
+    })
+    .finally(() => {
+      joinInFlight = null;
+    });
+  const result = await joinInFlight;
+  if (notify) notifyMembership({ code: membership.code, result });
+  return result;
+}
+
 getSocket().on("connect", () => {
   if (!activeMembership) return;
-  const { code, name, avatar, deviceId } = activeMembership;
-  request("room:join", { code, name, avatar, deviceId });
+  void performJoin(activeMembership, true);
 });
 
 export async function createRoom(name: string, avatar: AvatarChoice, deviceId: string) {
-  const result = await request<{ code: string }>("room:create", { name, avatar, deviceId });
-  if (result.ok) activeMembership = { code: result.value.code, name, avatar, deviceId };
+  const tokens = createInitialMembershipTokens();
+  const result = await request<{ code: string }>("room:create", {
+    name,
+    avatar,
+    deviceId,
+    resumeToken: tokens.pending,
+  });
+  if (result.ok) {
+    storeCreatedMembership(result.value.code, tokens.pending);
+    activeMembership = { code: result.value.code, name, avatar, deviceId };
+  }
   return result;
 }
 
 export async function joinRoom(code: string, name: string, avatar: AvatarChoice, deviceId: string) {
-  const result = await request<PublicRoom>("room:join", { code, name, avatar, deviceId });
-  if (result.ok) activeMembership = { code, name, avatar, deviceId };
+  const membership = { code: code.toUpperCase(), name, avatar, deviceId };
+  activeMembership = membership;
+  const result = await performJoin(membership, false);
+  if (!result.ok && !isTransient(result.error)) activeMembership = null;
   return result;
+}
+
+export function retryActiveMembership(): Promise<Envelope<PublicRoom>> | null {
+  return activeMembership ? performJoin(activeMembership, false) : null;
+}
+
+export function onMembershipResult(cb: (event: MembershipResultEvent) => void): () => void {
+  membershipListeners.add(cb);
+  return () => membershipListeners.delete(cb);
 }
 
 export function startRoom(code: string, deviceId: string) {
@@ -50,6 +160,7 @@ export function kickPlayer(code: string, hostDeviceId: string, targetDeviceId: s
 
 export function leaveRoom(code: string, deviceId: string) {
   if (activeMembership?.code === code) activeMembership = null;
+  clearMembershipCredentials(code);
   getSocket().emit("room:leave", { code, deviceId });
 }
 
@@ -62,19 +173,29 @@ export function onRoomState(cb: (room: PublicRoom) => void): () => void {
 export function onKicked(cb: (code: string) => void): () => void {
   const socket = getSocket();
   const handler = (payload: { code: string }) => {
-    // Otherwise a later socket reconnect (network blip, tab wake) would silently
-    // re-announce room:join from activeMembership and undo the kick.
     if (activeMembership?.code === payload.code) activeMembership = null;
+    clearMembershipCredentials(payload.code);
     cb(payload.code);
   };
   socket.on("room:kicked", handler);
   return () => socket.off("room:kicked", handler);
 }
 
+export function onRoomReplaced(cb: (code: string) => void): () => void {
+  const socket = getSocket();
+  const handler = (payload: { code: string }) => {
+    if (activeMembership?.code === payload.code) activeMembership = null;
+    cb(payload.code);
+  };
+  socket.on("room:replaced", handler);
+  return () => socket.off("room:replaced", handler);
+}
+
 export function onRoomExited(cb: (code: string) => void): () => void {
   const socket = getSocket();
   const handler = (payload: { code: string }) => {
     if (activeMembership?.code === payload.code) activeMembership = null;
+    clearMembershipCredentials(payload.code);
     cb(payload.code);
   };
   socket.on("room:exited", handler);

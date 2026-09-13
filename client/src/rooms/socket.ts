@@ -14,6 +14,9 @@ export function getSocket(): Socket {
     socket = API_BASE ? io(API_BASE, opts) : io(opts);
   }
   if (!socket.connected) {
+    // The token can be renewed after this singleton was created. Socket.IO otherwise
+    // keeps the stale handshake auth object forever and every reconnect is rejected.
+    socket.auth = { token: getAuthToken() };
     socket.connect();
   }
   return socket;

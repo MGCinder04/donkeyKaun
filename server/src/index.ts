@@ -13,6 +13,7 @@ import {
 } from "./security/passcodeGate.js";
 import { registerRoomHandlers } from "./rooms/socketHandlers.js";
 import { sweepStaleRooms } from "./rooms/store.js";
+import { deletePersistedRoom, persistRoom, persistenceConfigured } from "./rooms/roomPersistence.js";
 import { sweepTurnSecurityState } from "./voice/iceServers.js";
 
 assertSecureProductionConfig();
@@ -64,6 +65,7 @@ if (isGateEnabled()) {
 } else {
   console.log("[security] site passcode gate is disabled (SITE_PASSCODE not set)");
 }
+console.log(`[rooms] persistent recovery is ${persistenceConfigured() ? "ENABLED" : "disabled"}`);
 
 app.use(cors);
 app.use((_req, res, next) => {
@@ -107,7 +109,11 @@ io.on("connection", (socket) => {
   });
 });
 
-setInterval(sweepStaleRooms, 60_000);
+setInterval(() => {
+  const { changed, deletedCodes } = sweepStaleRooms();
+  for (const room of changed) void persistRoom(room);
+  for (const code of deletedCodes) void deletePersistedRoom(code);
+}, 60_000);
 setInterval(sweepStaleAttempts, 60_000);
 setInterval(sweepTurnSecurityState, 60_000);
 

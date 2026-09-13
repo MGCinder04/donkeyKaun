@@ -165,6 +165,11 @@ export function assertSecureProductionConfig(): void {
   ) {
     throw new Error("TURN_ENABLED=true requires both Cloudflare TURN credentials in production");
   }
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (Boolean(redisUrl) !== Boolean(redisToken)) {
+    throw new Error("Set both UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN, or neither");
+  }
 }
 
 export function resetSecurityStateForTests(): void {

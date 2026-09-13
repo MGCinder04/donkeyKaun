@@ -15,6 +15,8 @@ const managedEnv = [
   "TURN_ENABLED",
   "CLOUDFLARE_TURN_KEY_ID",
   "CLOUDFLARE_TURN_KEY_API_TOKEN",
+  "UPSTASH_REDIS_REST_URL",
+  "UPSTASH_REDIS_REST_TOKEN",
 ] as const;
 const originalEnv = new Map(managedEnv.map((key) => [key, process.env[key]]));
 
@@ -107,5 +109,13 @@ describe("passcode security", () => {
     delete process.env.CLOUDFLARE_TURN_KEY_ID;
     delete process.env.CLOUDFLARE_TURN_KEY_API_TOKEN;
     expect(() => assertSecureProductionConfig()).toThrow(/TURN_ENABLED/);
+
+    process.env.TURN_ENABLED = "false";
+    process.env.UPSTASH_REDIS_REST_URL = "https://example.upstash.io";
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    expect(() => assertSecureProductionConfig()).toThrow(/UPSTASH/);
+
+    process.env.UPSTASH_REDIS_REST_TOKEN = "example-token";
+    expect(() => assertSecureProductionConfig()).not.toThrow();
   });
 });

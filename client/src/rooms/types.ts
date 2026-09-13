@@ -76,6 +76,9 @@ export type RoomErrorCode =
   | "dealer_restricted"
   | "not_your_card"
   | "must_follow_suit"
-  | "kicked";
+  | "kicked"
+  | "session_conflict";
 
-export type Envelope<T> = { ok: true; value: T } | { ok: false; error: RoomErrorCode };
+export type ClientRoomErrorCode = RoomErrorCode | "network" | "timeout" | "unauthorized";
+
+export type Envelope<T> = { ok: true; value: T } | { ok: false; error: ClientRoomErrorCode };

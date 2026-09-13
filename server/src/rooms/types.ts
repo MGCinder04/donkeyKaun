@@ -12,6 +12,8 @@ export interface Player {
   deviceId: string;
   name: string;
   avatar: AvatarChoice;
+  /** SHA-256 only. The raw per-room resume token never leaves the player's browser. */
+  resumeTokenHash: string;
   socketId: string | null;
   joinedAt: number;
   disconnectedAt: number | null;
@@ -59,4 +61,5 @@ export type RoomErrorCode =
   | "dealer_restricted"
   | "not_your_card"
   | "must_follow_suit"
-  | "kicked";
+  | "kicked"
+  | "session_conflict";

@@ -8,7 +8,21 @@ export function Create() {
   const navigate = useNavigate();
   const identity = useIdentity();
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const started = useRef(false);
+
+  async function handleCreate() {
+    if (!hasCompleteProfile(identity) || creating) return;
+    setCreating(true);
+    setError(null);
+    const result = await createRoom(identity.name, identity.avatar!, identity.deviceId);
+    setCreating(false);
+    if (result.ok) {
+      navigate(`/room/${result.value.code}`, { replace: true });
+    } else {
+      setError("Couldn't create a room right now. The server may still be waking up.");
+    }
+  }
 
   useEffect(() => {
     if (!hasCompleteProfile(identity)) {
@@ -18,13 +32,9 @@ export function Create() {
     if (started.current) return;
     started.current = true;
 
-    createRoom(identity.name, identity.avatar!, identity.deviceId).then((result) => {
-      if (result.ok) {
-        navigate(`/room/${result.value.code}`, { replace: true });
-      } else {
-        setError("Couldn't create a room right now. Check your connection and try again.");
-      }
-    });
+    void handleCreate();
+    // The initial call is intentionally one-shot; the visible Retry button owns later attempts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity, navigate]);
 
   return (
@@ -39,10 +49,13 @@ export function Create() {
             <Button variant="ghost" onClick={() => navigate("/")}>
               Back home
             </Button>
+            <Button variant="primary" onClick={handleCreate} disabled={creating}>
+              {creating ? "Trying…" : "Try again"}
+            </Button>
           </div>
         </>
       ) : (
-        <p style={{ color: "var(--ink-dim)" }}>Creating your room…</p>
+        <p style={{ color: "var(--ink-dim)" }}>{creating ? "Creating your room…" : "Preparing…"}</p>
       )}
     </section>
   );

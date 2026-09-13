@@ -59,6 +59,7 @@ export function createRoom(
   rawAvatar: unknown,
   deviceId: string,
   socketId: string,
+  resumeTokenHash = "",
 ): RoomResult<Room> {
   const name = sanitizeName(rawName);
   const avatar = sanitizeAvatar(rawAvatar);
@@ -66,7 +67,15 @@ export function createRoom(
   if (rooms.size >= MAX_ACTIVE_ROOMS) return { ok: false, error: "full" };
 
   const code = generateCode();
-  const player: Player = { deviceId, name, avatar, socketId, joinedAt: Date.now(), disconnectedAt: null };
+  const player: Player = {
+    deviceId,
+    name,
+    avatar,
+    resumeTokenHash,
+    socketId,
+    joinedAt: Date.now(),
+    disconnectedAt: null,
+  };
   const room: Room = {
     code,
     status: "lobby",
@@ -85,6 +94,7 @@ export function joinRoom(
   rawAvatar: unknown,
   deviceId: string,
   socketId: string,
+  resumeTokenHash = "",
 ): RoomResult<Room> {
   const name = sanitizeName(rawName);
   const avatar = sanitizeAvatar(rawAvatar);
@@ -108,7 +118,34 @@ export function joinRoom(
   if (room.status !== "lobby") return { ok: false, error: "in_progress" };
   if (room.players.length >= MAX_PLAYERS) return { ok: false, error: "full" };
 
-  room.players.push({ deviceId, name, avatar, socketId, joinedAt: Date.now(), disconnectedAt: null });
+  room.players.push({
+    deviceId,
+    name,
+    avatar,
+    resumeTokenHash,
+    socketId,
+    joinedAt: Date.now(),
+    disconnectedAt: null,
+  });
+  return { ok: true, value: room };
+}
+
+/** Restore one server-owned snapshot after a process restart. Socket ids from another
+ * process are never trusted: every player must prove membership and reconnect. */
+export function restoreRoom(room: Room): RoomResult<Room> {
+  const code = room.code.toUpperCase();
+  const existing = rooms.get(code);
+  if (existing) return { ok: true, value: existing };
+  if (rooms.size >= MAX_ACTIVE_ROOMS) return { ok: false, error: "full" };
+  room.code = code;
+  room.players = room.players.map((player) => ({
+    ...player,
+    resumeTokenHash: player.resumeTokenHash ?? "",
+    socketId: null,
+    disconnectedAt: Date.now(),
+  }));
+  room.kickedDeviceIds = new Set(room.kickedDeviceIds);
+  rooms.set(code, room);
   return { ok: true, value: room };
 }
 
@@ -304,9 +341,17 @@ export function toPublicRoom(room: Room): PublicRoom {
  *  individually removed — that would break seat order/dealing) entirely abandoned, i.e.
  *  every player has been disconnected past the grace period. Without this, a mid-game
  *  room nobody ever returns to would sit in memory forever. */
-export function sweepStaleRooms(): void {
+export interface RoomSweepResult {
+  changed: Room[];
+  deletedCodes: string[];
+}
+
+export function sweepStaleRooms(): RoomSweepResult {
   const now = Date.now();
+  const changed: Room[] = [];
+  const deletedCodes: string[] = [];
   for (const room of rooms.values()) {
+    const playerCountBefore = room.players.length;
     if (room.status === "lobby") {
       room.players = room.players.filter(
         (p) => p.socketId !== null || p.disconnectedAt === null || now - p.disconnectedAt < DISCONNECT_GRACE_MS,
@@ -317,6 +362,10 @@ export function sweepStaleRooms(): void {
     );
     if (room.players.length === 0 || abandoned) {
       rooms.delete(room.code);
+      deletedCodes.push(room.code);
+    } else if (room.players.length !== playerCountBefore) {
+      changed.push(room);
     }
   }
+  return { changed, deletedCodes };
 }

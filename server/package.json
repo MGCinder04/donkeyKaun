@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@upstash/redis": "^1.38.4",
     "dotenv": "^16.4.7",
     "express": "^5.2.1",
     "socket.io": "^4.8.1"
