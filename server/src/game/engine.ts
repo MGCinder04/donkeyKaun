@@ -239,3 +239,126 @@ export function continueGame(state: GameState, rng: () => number = Math.random):
   const nextDealer = (state.dealerSeat + 1) % state.seatOrder.length;
   return buildRound(state.seatOrder, 1, nextDealer, state.scores, rng);
 }
+
+function renameRecordKey<T>(record: Record<string, T>, from: string, to: string): Record<string, T> {
+  const renamed = { ...record };
+  if (Object.hasOwn(renamed, from)) {
+    renamed[to] = renamed[from];
+    delete renamed[from];
+  }
+  return renamed;
+}
+
+function removeRecordKey<T>(record: Record<string, T>, deviceId: string): Record<string, T> {
+  const trimmed = { ...record };
+  delete trimmed[deviceId];
+  return trimmed;
+}
+
+function renameSummary(summary: RoundSummary | null, from: string, to: string): RoundSummary | null {
+  if (!summary) return null;
+  return {
+    ...summary,
+    results: summary.results.map((result) =>
+      result.deviceId === from ? { ...result, deviceId: to } : result,
+    ),
+  };
+}
+
+function removeFromSummary(summary: RoundSummary | null, deviceId: string): RoundSummary | null {
+  if (!summary) return null;
+  return { ...summary, results: summary.results.filter((result) => result.deviceId !== deviceId) };
+}
+
+/** Transfer a live seat to a new device without changing its position, cards, bid,
+ * hands won, score, or history. This is also the seam a future bot player can use. */
+export function replacePlayer(state: GameState, from: string, to: string): GameState {
+  if (!state.seatOrder.includes(from) || state.seatOrder.includes(to)) return state;
+  return {
+    ...state,
+    seatOrder: state.seatOrder.map((id) => (id === from ? to : id)),
+    hands: renameRecordKey(state.hands, from, to),
+    bids: renameRecordKey(state.bids, from, to),
+    bidOrder: state.bidOrder.map((id) => (id === from ? to : id)),
+    tricksWon: renameRecordKey(state.tricksWon, from, to),
+    currentTrick: state.currentTrick.map((play) =>
+      play.deviceId === from ? { ...play, deviceId: to } : play,
+    ),
+    scores: renameRecordKey(state.scores, from, to),
+    lastRoundSummary: renameSummary(state.lastRoundSummary, from, to),
+    roundHistory: state.roundHistory.map((summary) => renameSummary(summary, from, to)!),
+    donkeys: state.donkeys?.map((id) => (id === from ? to : id)) ?? null,
+  };
+}
+
+/** Remove a departed seat while preserving a playable state for everyone left. Cards
+ * still in that hand (and any card they played into the current hand) are discarded. */
+export function removePlayer(state: GameState, deviceId: string): GameState {
+  const removedSeat = state.seatOrder.indexOf(deviceId);
+  if (removedSeat < 0 || state.seatOrder.length <= 2) return state;
+
+  const previousSeatOrder = state.seatOrder;
+  const seatOrder = previousSeatOrder.filter((id) => id !== deviceId);
+  const bidOrder = state.bidOrder.filter((id) => id !== deviceId);
+  const bids = removeRecordKey(state.bids, deviceId);
+  const currentTrick = state.currentTrick.filter((play) => play.deviceId !== deviceId);
+
+  let dealerSeat = state.dealerSeat;
+  if (removedSeat < state.dealerSeat) dealerSeat -= 1;
+  else if (removedSeat === state.dealerSeat) dealerSeat = (removedSeat - 1 + seatOrder.length) % seatOrder.length;
+
+  let phase = state.phase;
+  let bidTurnIndex = state.bidTurnIndex;
+  let turnSeat = state.turnSeat;
+
+  if (phase === "bidding") {
+    const pendingBid = bidOrder.findIndex((id) => bids[id] === null);
+    if (pendingBid === -1) {
+      phase = "trick";
+      bidTurnIndex = bidOrder.length;
+      turnSeat = seatOrder.indexOf(bidOrder[0]);
+    } else {
+      bidTurnIndex = pendingBid;
+      const oldTurnId = previousSeatOrder[state.turnSeat];
+      turnSeat = oldTurnId === deviceId ? removedSeat % seatOrder.length : seatOrder.indexOf(oldTurnId);
+    }
+  } else if (phase === "trick") {
+    if (currentTrick.length === seatOrder.length) {
+      turnSeat = -1;
+    } else {
+      const oldTurnId = previousSeatOrder[state.turnSeat];
+      if (oldTurnId && oldTurnId !== deviceId) {
+        turnSeat = seatOrder.indexOf(oldTurnId);
+      } else {
+        const nextId = previousSeatOrder[(removedSeat + 1) % previousSeatOrder.length];
+        turnSeat = seatOrder.indexOf(nextId);
+      }
+    }
+  }
+
+  const scores = removeRecordKey(state.scores, deviceId);
+  const donkeys = phase === "game-end"
+    ? (() => {
+        const minimum = Math.min(...Object.values(scores));
+        return Object.entries(scores).filter(([, score]) => score === minimum).map(([id]) => id);
+      })()
+    : state.donkeys?.filter((id) => id !== deviceId) ?? null;
+
+  return {
+    ...state,
+    seatOrder,
+    hands: removeRecordKey(state.hands, deviceId),
+    phase,
+    bids,
+    bidOrder,
+    bidTurnIndex,
+    tricksWon: removeRecordKey(state.tricksWon, deviceId),
+    currentTrick,
+    turnSeat,
+    dealerSeat,
+    scores,
+    lastRoundSummary: removeFromSummary(state.lastRoundSummary, deviceId),
+    roundHistory: state.roundHistory.map((summary) => removeFromSummary(summary, deviceId)!),
+    donkeys,
+  };
+}

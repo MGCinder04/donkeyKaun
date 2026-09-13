@@ -7,6 +7,7 @@ const room: Room = {
   status: "lobby",
   createdAt: 123,
   game: null,
+  replacementForDeviceId: null,
   kickedDeviceIds: new Set(["kicked"]),
   players: [
     {

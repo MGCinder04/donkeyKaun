@@ -60,6 +60,7 @@ export interface PublicRoom {
   status: RoomStatus;
   players: PublicPlayer[];
   game: PublicGameState | null;
+  replacementForDeviceId: string | null;
 }
 
 export type RoomErrorCode =
@@ -77,7 +78,9 @@ export type RoomErrorCode =
   | "not_your_card"
   | "must_follow_suit"
   | "kicked"
-  | "session_conflict";
+  | "session_conflict"
+  | "player_connected"
+  | "too_few_players";
 
 export type ClientRoomErrorCode = RoomErrorCode | "network" | "timeout" | "unauthorized";
 

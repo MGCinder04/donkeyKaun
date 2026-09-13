@@ -102,6 +102,7 @@ async function performJoin(membership: Membership, notify: boolean): Promise<Env
         activeMembership = membership;
         return { ok: true, value: wireResult.value.room };
       }
+      if (wireResult.error === "kicked") clearMembershipCredentials(membership.code);
       if (isTransient(wireResult.error)) scheduleRejoin();
       return wireResult;
     })
@@ -158,9 +159,17 @@ export function kickPlayer(code: string, hostDeviceId: string, targetDeviceId: s
   return request<null>("room:kick", { code, deviceId: hostDeviceId, targetDeviceId });
 }
 
-export function leaveRoom(code: string, deviceId: string) {
+export function setReplacementSeat(code: string, hostDeviceId: string, targetDeviceId: string | null) {
+  return request<null>("room:replacement", { code, deviceId: hostDeviceId, targetDeviceId });
+}
+
+export function removePlayerSeat(code: string, hostDeviceId: string, targetDeviceId: string) {
+  return request<null>("room:remove-seat", { code, deviceId: hostDeviceId, targetDeviceId });
+}
+
+export function leaveRoom(code: string, deviceId: string, preserveMembership = false) {
   if (activeMembership?.code === code) activeMembership = null;
-  clearMembershipCredentials(code);
+  if (!preserveMembership) clearMembershipCredentials(code);
   getSocket().emit("room:leave", { code, deviceId });
 }
 

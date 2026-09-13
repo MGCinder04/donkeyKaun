@@ -6,6 +6,8 @@ import {
   kickPlayer,
   leaveRoom,
   markSocketDisconnected,
+  removePlayerFromRoom,
+  setReplacementSeat,
   startRoom,
   sweepStaleRooms,
 } from "./store.js";
@@ -99,6 +101,21 @@ describe("leaveRoom mid-game", () => {
     expect(room?.players.find((p) => p.deviceId === "d2")?.socketId).toBeNull();
   });
 
+  it("lets an accidentally departed player reclaim the same live seat", () => {
+    const created = createRoom("Host", avatar, "return-host", "return-s1");
+    if (!created.ok) throw new Error("setup failed");
+    joinRoom(created.value.code, "Guest", avatar, "return-guest", "return-s2");
+    startRoom(created.value.code, "return-host");
+    const originalHand = findRoom(created.value.code)?.game?.hands["return-guest"];
+
+    leaveRoom(created.value.code, "return-guest");
+    const rejoined = joinRoom(created.value.code, "Guest", avatar, "return-guest", "return-s3");
+
+    expect(rejoined.ok).toBe(true);
+    expect(findRoom(created.value.code)?.game?.hands["return-guest"]).toEqual(originalHand);
+    expect(findRoom(created.value.code)?.players.find((p) => p.deviceId === "return-guest")?.socketId).toBe("return-s3");
+  });
+
   it("still removes the player outright when the room is still in the lobby", () => {
     const created = createRoom("Host", avatar, "d1", "s1");
     if (!created.ok) throw new Error("setup failed");
@@ -108,6 +125,62 @@ describe("leaveRoom mid-game", () => {
     const room = leaveRoom(code, "d2");
 
     expect(room?.players.map((p) => p.deviceId)).toEqual(["d1"]);
+  });
+});
+
+describe("mid-game seat decisions", () => {
+  it("lets the host open a disconnected seat and transfers all game state to its replacement", () => {
+    const created = createRoom("Host", avatar, "replace-host", "replace-s1");
+    if (!created.ok) throw new Error("setup failed");
+    const code = created.value.code;
+    joinRoom(code, "Guest", avatar, "replace-old", "replace-s2");
+    joinRoom(code, "Third", avatar, "replace-third", "replace-s3");
+    startRoom(code, "replace-host");
+    const room = findRoom(code)!;
+    room.game!.scores["replace-old"] = 43;
+    const inheritedHand = room.game!.hands["replace-old"];
+    markSocketDisconnected("replace-s2");
+
+    expect(setReplacementSeat(code, "replace-host", "replace-old").ok).toBe(true);
+    const joined = joinRoom(code, "New Player", avatar, "replace-new", "replace-s4");
+
+    expect(joined.ok).toBe(true);
+    expect(findRoom(code)?.replacementForDeviceId).toBeNull();
+    expect(findRoom(code)?.game?.seatOrder).toContain("replace-new");
+    expect(findRoom(code)?.game?.seatOrder).not.toContain("replace-old");
+    expect(findRoom(code)?.game?.hands["replace-new"]).toEqual(inheritedHand);
+    expect(findRoom(code)?.game?.scores["replace-new"]).toBe(43);
+    expect(findRoom(code)?.kickedDeviceIds.has("replace-old")).toBe(true);
+  });
+
+  it("removes a disconnected seat and keeps a three-player game playable with two", () => {
+    const created = createRoom("Host", avatar, "remove-host", "remove-s1");
+    if (!created.ok) throw new Error("setup failed");
+    const code = created.value.code;
+    joinRoom(code, "Leaving", avatar, "remove-old", "remove-s2");
+    joinRoom(code, "Third", avatar, "remove-third", "remove-s3");
+    startRoom(code, "remove-host");
+    markSocketDisconnected("remove-s2");
+
+    const removed = removePlayerFromRoom(code, "remove-host", "remove-old");
+
+    expect(removed.ok).toBe(true);
+    expect(findRoom(code)?.players.map((player) => player.deviceId)).toEqual(["remove-host", "remove-third"]);
+    expect(findRoom(code)?.game?.seatOrder).toEqual(["remove-host", "remove-third"]);
+  });
+
+  it("never lets the host reduce a game below two players", () => {
+    const created = createRoom("Host", avatar, "minimum-host", "minimum-s1");
+    if (!created.ok) throw new Error("setup failed");
+    const code = created.value.code;
+    joinRoom(code, "Guest", avatar, "minimum-guest", "minimum-s2");
+    startRoom(code, "minimum-host");
+    markSocketDisconnected("minimum-s2");
+
+    expect(removePlayerFromRoom(code, "minimum-host", "minimum-guest")).toEqual({
+      ok: false,
+      error: "too_few_players",
+    });
   });
 });
 

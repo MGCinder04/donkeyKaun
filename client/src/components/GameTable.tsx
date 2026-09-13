@@ -3,8 +3,9 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AvatarThumb } from "./AvatarThumb";
 import { Button } from "./Button";
 import { ScoreSheetModal } from "./ScoreSheetModal";
+import { PlayerAdminModal } from "./PlayerAdminModal";
 import { gameSeatPosition, pileSlotPosition } from "../rooms/gameSeatLayout";
-import { useDealAnimation, useRoundRecap, useTrickAnimation } from "../rooms/gameAnimations";
+import { roundSummaryKey, useDealAnimation, useRoundRecap, useTrickAnimation } from "../rooms/gameAnimations";
 import { SUIT_COLOR, SUIT_SYMBOL, cardKey, cardLabel } from "../lib/cardDisplay";
 import {
   playCardSound,
@@ -27,6 +28,10 @@ interface GameTableProps {
   onNewGame: () => void;
   onContinue: () => void;
   onExit: () => void;
+  replacementForDeviceId: string | null;
+  onKickPlayer: (deviceId: string, name: string) => Promise<void>;
+  onToggleReplacement: (deviceId: string, open: boolean) => Promise<void>;
+  onRemovePlayer: (deviceId: string, name: string) => Promise<void>;
   speakingDeviceIds?: Set<string>;
   mutedVoiceDeviceIds?: Set<string>;
   onToggleVoiceMute?: (deviceId: string) => void;
@@ -44,13 +49,19 @@ export function GameTable({
   onNewGame,
   onContinue,
   onExit,
+  replacementForDeviceId,
+  onKickPlayer,
+  onToggleReplacement,
+  onRemovePlayer,
   speakingDeviceIds,
   mutedVoiceDeviceIds,
   onToggleVoiceMute,
 }: GameTableProps) {
   const [showScoreSheet, setShowScoreSheet] = useState(false);
+  const [managePlayerId, setManagePlayerId] = useState<string | null>(null);
   const nameFor = (id: string) => players.find((p) => p.deviceId === id)?.name ?? "?";
   const legalKeys = new Set(legalCards.map(cardKey));
+  const managedPlayer = players.find((player) => player.deviceId === managePlayerId) ?? null;
 
   const total = game.seatOrder.length;
   const mySeatIndex = game.seatOrder.indexOf(myDeviceId);
@@ -98,13 +109,14 @@ export function GameTable({
     prevMyTurnRef.current = isMyTurn;
   }, [isMyTurn]);
 
-  const prevRoundSummaryRef = useRef(roundSummary);
+  const summaryKey = roundSummaryKey(roundSummary);
+  const prevRoundSummaryRef = useRef(summaryKey);
   useEffect(() => {
-    if (roundSummary && roundSummary !== prevRoundSummaryRef.current && game.phase !== "game-end") {
+    if (roundSummary && summaryKey !== prevRoundSummaryRef.current && game.phase !== "game-end") {
       playRoundEndSound();
     }
-    prevRoundSummaryRef.current = roundSummary;
-  }, [roundSummary, game.phase]);
+    prevRoundSummaryRef.current = summaryKey;
+  }, [roundSummary, summaryKey, game.phase]);
 
   const prevPhaseRef = useRef(game.phase);
   useEffect(() => {
@@ -126,32 +138,41 @@ export function GameTable({
       <button
         type="button"
         onClick={() => setShowScoreSheet(true)}
-        className="fixed left-4 top-4 z-40 rounded-full px-3 py-1.5 text-xs font-semibold"
+        className="fixed left-4 top-4 z-40 rounded-full px-4 py-2 text-base font-semibold"
         style={{ border: "1px solid var(--hairline)", color: "var(--ink-dim)", background: "var(--ground-raised)" }}
       >
         Scoresheet
       </button>
+
+      {replacementForDeviceId && (
+        <div
+          className="mx-auto mb-6 max-w-lg rounded-2xl border px-5 py-3 text-base font-semibold"
+          style={{ background: "var(--ground-raised)", borderColor: "var(--gold)", color: "var(--gold-bright)" }}
+        >
+          Replacement seat open for {nameFor(replacementForDeviceId)}. The next new player joining this room will take that seat.
+        </div>
+      )}
 
       {roundSummary && (
         <AnimatePresence mode="wait">
           {recapVisible ? (
             <motion.div
               key="recap-rich"
-              className="mx-auto mb-4 max-w-md rounded-2xl border px-5 py-3 text-left"
+              className="mx-auto mb-16 max-w-lg rounded-2xl border px-6 py-4 text-left"
               style={{ background: "var(--ground-raised)", borderColor: "var(--hairline)" }}
               initial={{ opacity: 0, y: -8, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.97 }}
               transition={{ type: "spring", stiffness: 300, damping: 24 }}
             >
-              <p className="mb-2 text-xs font-semibold uppercase" style={{ color: "var(--gold)", letterSpacing: "0.14em" }}>
+              <p className="mb-3 text-base font-semibold uppercase" style={{ color: "var(--gold)", letterSpacing: "0.12em" }}>
                 Round {roundSummary.round} complete
               </p>
               <div className="flex flex-col gap-1">
                 {roundSummary.results.map((r) => {
                   const made = r.bid === r.tricksWon;
                   return (
-                    <div key={r.deviceId} className="flex items-center justify-between gap-6 text-sm">
+                    <div key={r.deviceId} className="flex items-center justify-between gap-6 text-lg leading-relaxed">
                       <span style={{ color: "var(--ink)" }}>{nameFor(r.deviceId)}</span>
                       <span style={{ color: made ? "var(--gold-bright)" : "var(--brick)" }}>
                         bid {r.bid} → won {r.tricksWon} · {r.roundScore} pts
@@ -164,7 +185,7 @@ export function GameTable({
           ) : (
             <motion.p
               key="recap-compact"
-              className="mb-3 text-xs"
+              className="mx-auto mb-16 max-w-xl text-base leading-relaxed"
               style={{ color: "var(--ink-faint)" }}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -176,7 +197,7 @@ export function GameTable({
         </AnimatePresence>
       )}
 
-      <div className="relative mx-auto mb-6 h-[380px] max-w-xl">
+      <div className="relative mx-auto mb-8 h-[430px] max-w-2xl sm:h-[480px]">
         <div
           className="absolute inset-[14%] rounded-full border"
           style={{
@@ -186,14 +207,14 @@ export function GameTable({
         />
 
         <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2">
-          <div className="text-xs" style={{ color: "var(--ink-dim)" }}>
+          <div className="text-base" style={{ color: "var(--ink-dim)" }}>
             Round {game.round}/8 · Trump{" "}
             <strong style={{ color: SUIT_COLOR[game.trumpSuit], fontSize: "1.1em" }}>
               {SUIT_SYMBOL[game.trumpSuit]}
             </strong>
           </div>
           {game.phase === "trick" && !dealing && displayTrick.length === 0 && (
-            <p className="text-xs" style={{ color: "var(--ink-faint)" }}>
+            <p className="text-base" style={{ color: "var(--ink-faint)" }}>
               Hand starting…
             </p>
           )}
@@ -222,12 +243,12 @@ export function GameTable({
                 transition={{ duration: isSweepTarget ? 0.5 : 0.35, ease: "easeOut" }}
               >
                 <div
-                  className="flex h-14 w-10 items-center justify-center rounded-md text-base font-bold"
+                  className="flex h-16 w-11 items-center justify-center rounded-md text-xl font-bold"
                   style={{ background: "var(--card-stock)", color: SUIT_COLOR[t.card.suit], border: "1px solid var(--hairline)" }}
                 >
                   {cardLabel(t.card)}
                 </div>
-                <span className="mt-1 text-[9px]" style={{ color: "var(--ink-faint)" }}>
+                <span className="mt-1 text-xs" style={{ color: "var(--ink-faint)" }}>
                   {nameFor(t.deviceId)}
                 </span>
               </motion.div>
@@ -266,7 +287,7 @@ export function GameTable({
           return (
             <div
               key={id}
-              className="absolute flex w-16 -translate-x-1/2 -translate-y-1/2 flex-col items-center text-center"
+              className="absolute flex w-24 -translate-x-1/2 -translate-y-1/2 flex-col items-center text-center"
               style={{ top: position.top, left: position.left }}
             >
               <motion.div
@@ -277,7 +298,7 @@ export function GameTable({
                 {player && (
                   <AvatarThumb
                     avatar={player.avatar}
-                    size={44}
+                    size={52}
                     className={player.connected ? "" : "opacity-40 grayscale"}
                   />
                 )}
@@ -319,27 +340,43 @@ export function GameTable({
                     {mutedVoiceDeviceIds?.has(id) ? "🔇" : "🔊"}
                   </button>
                 )}
+                {isHost && !isSelf && player && (
+                  <button
+                    type="button"
+                    onClick={() => setManagePlayerId(id)}
+                    aria-label={`Manage ${nameFor(id)}`}
+                    title={`Manage ${nameFor(id)}`}
+                    className="absolute -right-2 -bottom-2 flex h-6 w-6 items-center justify-center rounded-full text-sm font-bold"
+                    style={{
+                      border: "1px solid var(--hairline)",
+                      background: "var(--ground-raised-2)",
+                      color: "var(--gold-bright)",
+                    }}
+                  >
+                    ⋯
+                  </button>
+                )}
               </motion.div>
               <span
-                className="max-w-[4.5rem] truncate text-xs font-semibold"
+                className="max-w-[6rem] truncate text-base font-semibold"
                 style={{ color: isSelf ? "var(--gold-bright)" : "var(--ink)" }}
               >
                 {nameFor(id)}
                 {isSelf ? " (you)" : ""}
               </span>
-              <span className="text-[10px]" style={{ color: "var(--ink-faint)" }}>
+              <span className="text-xs" style={{ color: "var(--ink-faint)" }}>
                 score {game.scores[id] ?? 0}
               </span>
-              <span className="text-[10px]" style={{ color: "var(--ink-faint)" }}>
+              <span className="text-xs" style={{ color: "var(--ink-faint)" }}>
                 bid {game.bids[id] ?? "—"} · won {game.tricksWon[id] ?? 0}
               </span>
               {!isSelf && (game.handCounts[id] ?? 0) > 0 && (
-                <span className="text-[9px]" style={{ color: "var(--ink-faint)" }}>
+                <span className="text-xs" style={{ color: "var(--ink-faint)" }}>
                   🂠 ×{game.handCounts[id]}
                 </span>
               )}
               {player && !player.connected && (
-                <span className="text-[9px]" style={{ color: "var(--ink-faint)" }}>
+                <span className="text-xs" style={{ color: "var(--ink-faint)" }}>
                   reconnecting…
                 </span>
               )}
@@ -349,12 +386,12 @@ export function GameTable({
       </div>
 
       {!dealing && game.phase === "bidding" && (
-        <p className="mb-3 text-sm" style={{ color: "var(--ink-dim)" }}>
+        <p className="mb-4 text-lg" style={{ color: "var(--ink-dim)" }}>
           {isMyBidTurn ? "Your bid — how many hands will you win?" : `Waiting for ${nameFor(game.bidTurnDeviceId ?? "")} to bid…`}
         </p>
       )}
       {!dealing && game.phase === "trick" && (
-        <p className="mb-3 text-sm" style={{ color: "var(--ink-dim)" }}>
+        <p className="mb-4 text-lg" style={{ color: "var(--ink-dim)" }}>
           {sweeping && sweepWinnerSeat !== null
             ? `${nameFor(game.seatOrder[sweepWinnerSeat])} wins the hand!`
             : displayTrick.length === total
@@ -374,7 +411,7 @@ export function GameTable({
               disabled={n === forbiddenBid}
               onClick={() => onBid(n)}
               title={n === forbiddenBid ? "Not allowed — would make total bids match the cards dealt" : undefined}
-              className="h-10 w-10 rounded-full text-sm font-semibold disabled:opacity-30"
+              className="h-12 w-12 rounded-full text-lg font-semibold disabled:opacity-30"
               style={{
                 background: n === forbiddenBid ? "transparent" : "linear-gradient(180deg, var(--gold-bright), var(--gold))",
                 color: n === forbiddenBid ? "var(--ink-faint)" : "#1a1206",
@@ -389,7 +426,7 @@ export function GameTable({
 
       {!dealing && (game.phase === "bidding" || game.phase === "trick") && hand.length > 0 && (
         <div className="mb-6">
-          <p className="mb-2 text-xs" style={{ color: "var(--ink-faint)" }}>
+          <p className="mb-3 text-base" style={{ color: "var(--ink-faint)" }}>
             Your hand
           </p>
           <div className="flex flex-wrap justify-center gap-2">
@@ -402,7 +439,7 @@ export function GameTable({
                   type="button"
                   disabled={!clickable}
                   onClick={() => onPlay(card)}
-                  className="flex h-20 w-14 items-center justify-center rounded-md text-lg font-bold transition-transform duration-150 disabled:opacity-35"
+                  className="flex h-24 w-16 items-center justify-center rounded-md text-2xl font-bold transition-transform duration-150 disabled:opacity-35"
                   style={{
                     background: "var(--card-stock)",
                     color: SUIT_COLOR[card.suit],
@@ -441,7 +478,7 @@ export function GameTable({
             })}
           </div>
           <motion.h3
-            className="mb-3 text-xl font-bold"
+            className="mb-3 text-2xl font-bold"
             initial={{ scale: 0.6, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ type: "spring", stiffness: 260, damping: 18 }}
@@ -449,7 +486,7 @@ export function GameTable({
             Game over
           </motion.h3>
           <motion.p
-            className="mb-4 text-sm"
+            className="mb-4 text-lg"
             style={{ color: "var(--ink-dim)" }}
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -460,13 +497,13 @@ export function GameTable({
           </motion.p>
           {isHost ? (
             <div className="flex flex-wrap justify-center gap-3">
-              <Button variant="primary" onClick={onNewGame}>
+              <Button variant="primary" className="text-lg" onClick={onNewGame}>
                 New Game
               </Button>
-              <Button variant="ghost" onClick={onContinue}>
+              <Button variant="ghost" className="text-lg" onClick={onContinue}>
                 Continue (keep scores)
               </Button>
-              <Button variant="ghost" onClick={onExit}>
+              <Button variant="ghost" className="text-lg" onClick={onExit}>
                 Exit
               </Button>
             </div>
@@ -483,6 +520,29 @@ export function GameTable({
           scores={game.scores}
           seatOrder={game.seatOrder}
           onClose={() => setShowScoreSheet(false)}
+        />
+      )}
+
+      {managedPlayer && isHost && managedPlayer.deviceId !== myDeviceId && (
+        <PlayerAdminModal
+          player={managedPlayer}
+          replacementOpen={replacementForDeviceId === managedPlayer.deviceId}
+          canRemove={game.seatOrder.length > 2}
+          onKick={async () => {
+            await onKickPlayer(managedPlayer.deviceId, managedPlayer.name);
+          }}
+          onToggleReplacement={async () => {
+            await onToggleReplacement(
+              managedPlayer.deviceId,
+              replacementForDeviceId !== managedPlayer.deviceId,
+            );
+            setManagePlayerId(null);
+          }}
+          onRemove={async () => {
+            await onRemovePlayer(managedPlayer.deviceId, managedPlayer.name);
+            setManagePlayerId(null);
+          }}
+          onClose={() => setManagePlayerId(null)}
         />
       )}
     </section>

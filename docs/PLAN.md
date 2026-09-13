@@ -17,8 +17,8 @@ against when something in the engine looks wrong. **Flag anything below that's o
 
 **Bidding (after cards are dealt, before play)**
 - Bidding order starts with the player after the dealer (the same player who leads the
-  first trick) and goes around the circle, **ending with the dealer**.
-- Each bid is a number of tricks a player claims they'll win exactly, in the range
+  first hand) and goes around the circle, **ending with the dealer**.
+- Each bid is a number of hands a player claims they'll win exactly, in the range
   `0` to `(cards dealt this round) + 1` — the `+1` exists as a "grace" value so a player
   who's mathematically locked into losing can bid the max and openly try to spoil other
   players' hands instead.
@@ -27,19 +27,19 @@ against when something in the engine looks wrong. **Flag anything below that's o
   "screw-the-dealer" rule — guarantees at least one player fails their bid.)
 
 **Play**
-- The player after the dealer leads the first trick and may lead any suit, including
-  trump. Whoever wins a trick leads the next one (also free to choose any suit).
+- The player after the dealer leads the first hand and may lead any suit, including
+  trump. Whoever wins a hand leads the next one (also free to choose any suit).
 - Players must follow the led suit if able. If unable, they may play trump (which
-  contests to win the trick) or discard any other suit (which can never win the trick
+  contests to win the hand) or discard any other suit (which can never win the hand
   regardless of rank).
-- Highest card of the led suit wins the trick, unless trump was played, in which case
+- Highest card of the led suit wins the hand, unless trump was played, in which case
   the highest trump played wins.
 - Card ranking: A high, then K, Q, J, 10 ... down to 2.
 
 **Scoring (per round)**
-- If a player wins **exactly** the number of tricks they bid: score = `(bid + 1) * 10 + bid`
+- If a player wins **exactly** the number of hands they bid: score = `(bid + 1) * 10 + bid`
   (e.g. bid 0 → 10, bid 1 → 21, bid 2 → 32, bid 3 → 43 ...).
-- If a player's actual tricks won ≠ their bid (over or under): score = `bid` itself
+- If a player's actual hands won ≠ their bid (over or under): score = `bid` itself
   (e.g. bid 0 → 0, bid 1 → 1, bid 7 → 7).
 - Round scores accumulate across all 8 rounds. After round 8, whoever has the **lowest**
   total is the Donkey.
@@ -58,8 +58,8 @@ against when something in the engine looks wrong. **Flag anything below that's o
 - Avatar picker: 50+ curated avatars (people + animals), recolorable/customizable, plus
   a display name. Choice remembered per-device (no login) so returning players skip
   setup.
-- Lobby: circular seating preview, host-only "start game" button gated on 5 or 6
-  players present.
+- Lobby: circular seating preview, host-only start button available with 2–6 players
+  (the traditional family game remains designed for 5 or 6).
 - Server-authoritative game engine implementing the rules above (client never sees
   other players' hands).
 - Bidding UI showing each player's bid live as they lock it in, with the dealer's
@@ -113,7 +113,7 @@ Each milestone ends with a checklist below and a demo for live testing before me
 - [x] Device-remembered identity (localStorage)
 - [x] Create room → code + link + QR
 - [x] Join room via code/link
-- [x] Lobby: circular seating (live), host start-game gating (5 or 6 players)
+- [x] Lobby: circular seating (live), host start-game gating (2–6 players)
 - [x] Extras added mid-milestone at your request: edit name/avatar anytime (header badge,
       or click your own seat in the lobby — both sync live to everyone), manual light/dark
       theme toggle
@@ -129,12 +129,10 @@ Each milestone ends with a checklist below and a demo for live testing before me
 - [x] Minimal functional UI wired up to actually play (bidding buttons, legal/illegal
       card highlighting, live scoreboard, game-end screen) — real animation and the
       circular table layout are still M3
-- [x] Fixed in M5: voluntary leave/host-kick mid-game no longer splice the player out of
-      `GameState.seatOrder` (that desynced the engine and permanently stalled the game) —
-      both are now treated as a disconnect, so the seat shows "reconnecting…" and the
-      player can rejoin normally. A mid-game kick additionally blocks that deviceId from
-      rejoining. Still no auto-forfeit/bot-takeover if a player never comes back — that
-      remains a known limitation, acceptable for a private friends-game v1.
+- [x] Live-seat continuity: a departed player can securely reclaim the exact same seat,
+      cards, bid, hands won and score. The host can keep the seat reserved, remove it and
+      safely continue with fewer players, or open it for a new player to inherit. The
+      same engine seam is ready for bot takeover in the next milestone.
 
 ### M3 — Game UI & Animation ✅
 - [x] Circular table layout (desktop + mobile) — ego-centric, you're always at 6 o'clock
@@ -164,6 +162,11 @@ Each milestone ends with a checklist below and a demo for live testing before me
       "reconnecting…" banner added for the local player, not just other seats)
 - [x] Sound effects (synthesized Web Audio tones — card play, trick win, your turn, round
       end, game end — plus a mute toggle next to the theme toggle, persisted like theme)
+- [x] Larger game-table typography and collision-free round recap layout on mobile and
+      desktop; recaps trigger once per actual round rather than on room broadcasts or
+      seat administration.
+- [x] Desktop microphone speech processing (echo cancellation, noise suppression, mono
+      capture, speech-band filtering and gentle compression).
 
 ### M6 — Deploy Hardening
 - [x] Secrets audit (nothing sensitive in the repo; `.env*` gitignored, `render.yaml`
@@ -179,6 +182,14 @@ Each milestone ends with a checklist below and a demo for live testing before me
 - [x] Secure same-device refresh/QR takeover with rotating resume credentials, bounded
       socket acknowledgements, authoritative reconnect state, and automatic voice-peer
       rebuilding after membership is restored
+
+### M7 — Bots (next)
+- [ ] Bot seat creation and host controls
+- [ ] Legal-play engine adapter using the existing replacement-seat seam
+- [ ] Bidding strategy and progressively stronger play strategies
+- [ ] Solo game against bots and bot takeover for a disconnected player
+- [ ] Deterministic bot tests plus difficulty/fairness tuning (bots never inspect cards
+      that a human in the same seat could not see)
 
 ## 6. Git workflow (for you to run day-to-day)
 

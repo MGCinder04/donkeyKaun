@@ -13,9 +13,6 @@ export function VoiceControl({ state }: VoiceControlProps) {
     micMuted,
     listeningMuted,
     playbackBlocked,
-    connectedPeerCount,
-    peerCount,
-    turnAvailable,
     enableMic,
     toggleMicMute,
     toggleListeningMute,
@@ -31,7 +28,7 @@ export function VoiceControl({ state }: VoiceControlProps) {
             onClick={toggleMicMute}
             aria-pressed={micMuted}
             aria-label={micMuted ? "Unmute microphone" : "Mute microphone"}
-            className="flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold"
+            className="flex items-center gap-2 rounded-full px-5 py-2.5 text-lg font-semibold"
             style={{
               border: "1px solid var(--hairline)",
               background: micMuted ? "var(--brick)" : "var(--ground-raised)",
@@ -41,7 +38,7 @@ export function VoiceControl({ state }: VoiceControlProps) {
             {micMuted ? "🎙️ Mic muted" : "🎙️ Mic live"}
           </button>
         ) : (
-          <Button variant="ghost" onClick={enableMic} disabled={micPending}>
+          <Button variant="ghost" onClick={enableMic} disabled={micPending} className="text-lg">
             {micPending ? "Requesting mic…" : "🎙️ Turn on microphone"}
           </Button>
         )}
@@ -51,7 +48,7 @@ export function VoiceControl({ state }: VoiceControlProps) {
           onClick={toggleListeningMute}
           aria-pressed={listeningMuted}
           aria-label={listeningMuted ? "Unmute all players" : "Mute all players"}
-          className="flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold"
+          className="flex items-center gap-2 rounded-full px-5 py-2.5 text-lg font-semibold"
           style={{
             border: "1px solid var(--hairline)",
             background: listeningMuted ? "var(--brick)" : "var(--ground-raised)",
@@ -68,13 +65,8 @@ export function VoiceControl({ state }: VoiceControlProps) {
         </Button>
       )}
 
-      <p className="text-xs" style={{ color: "var(--ink-faint)" }}>
-        {peerCount === 0
-          ? "Voice is ready — waiting for other players."
-          : `${connectedPeerCount} of ${peerCount} voice connections ready${turnAvailable ? " · TURN fallback ready" : ""}`}
-      </p>
       {micError && (
-        <p className="text-xs" style={{ color: "var(--brick)" }}>
+        <p className="text-base" style={{ color: "var(--brick)" }}>
           {micError}
         </p>
       )}

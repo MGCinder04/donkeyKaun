@@ -65,6 +65,7 @@ export function snapshotRoom(room: Room): StoredRoom {
     status: room.status,
     createdAt: room.createdAt,
     game: room.game,
+    replacementForDeviceId: room.replacementForDeviceId,
     kickedDeviceIds: [...room.kickedDeviceIds],
     players: room.players.map(({ socketId: _socketId, ...player }) => player),
   };
@@ -89,6 +90,8 @@ export function roomFromSnapshot(value: unknown): Room | null {
     status: stored.status === "playing" ? "playing" : "lobby",
     createdAt: typeof stored.createdAt === "number" ? stored.createdAt : Date.now(),
     game: stored.game ?? null,
+    replacementForDeviceId:
+      typeof stored.replacementForDeviceId === "string" ? stored.replacementForDeviceId : null,
     kickedDeviceIds: new Set(stored.kickedDeviceIds.filter((id): id is string => typeof id === "string")),
     players: stored.players.map((player) => ({
       ...player,

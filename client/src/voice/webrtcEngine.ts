@@ -33,6 +33,8 @@ export interface VoiceEngineSnapshot {
 }
 
 let localStream: MediaStream | null = null;
+let localCaptureStream: MediaStream | null = null;
+let localProcessorNodes: AudioNode[] = [];
 let myDeviceId = "";
 let roomCode = "";
 let audioContext: AudioContext | null = null;
@@ -426,9 +428,51 @@ export function setDesiredPeers(deviceIds: string[]): void {
 
 export async function startLocalMic(): Promise<void> {
   if (localStream) return;
-  localStream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-  });
+  const supported = navigator.mediaDevices.getSupportedConstraints() as MediaTrackSupportedConstraints &
+    Record<string, boolean | undefined>;
+  const constraints: MediaTrackConstraints & Record<string, unknown> = {
+    echoCancellation: { ideal: true },
+    noiseSuppression: { ideal: true },
+    autoGainControl: { ideal: true },
+  };
+  if (supported.channelCount) constraints.channelCount = { ideal: 1, max: 1 };
+  if (supported.sampleRate) constraints.sampleRate = { ideal: 48_000 };
+  if (supported.latency) constraints.latency = { ideal: 0.02 };
+  if (supported.voiceIsolation) constraints.voiceIsolation = { ideal: true };
+
+  localCaptureStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+  const captureTrack = localCaptureStream.getAudioTracks()[0];
+  if (captureTrack) captureTrack.contentHint = "speech";
+
+  // Browser echo cancellation handles speaker-to-mic feedback first. A narrow speech
+  // band then removes low-frequency room rumble and the high-pitched whine some desktop
+  // microphones/boost drivers produce, without sending local audio back to local output.
+  try {
+    const context = ensureAudioContext();
+    const source = context.createMediaStreamSource(localCaptureStream);
+    const highPass = context.createBiquadFilter();
+    highPass.type = "highpass";
+    highPass.frequency.value = 95;
+    highPass.Q.value = 0.7;
+    const lowPass = context.createBiquadFilter();
+    lowPass.type = "lowpass";
+    lowPass.frequency.value = 8_200;
+    lowPass.Q.value = 0.7;
+    const compressor = context.createDynamicsCompressor();
+    compressor.threshold.value = -24;
+    compressor.knee.value = 18;
+    compressor.ratio.value = 3;
+    compressor.attack.value = 0.004;
+    compressor.release.value = 0.22;
+    const destination = context.createMediaStreamDestination();
+    source.connect(highPass).connect(lowPass).connect(compressor).connect(destination);
+    localProcessorNodes = [source, highPass, lowPass, compressor, destination];
+    localStream = destination.stream;
+    const processedTrack = localStream.getAudioTracks()[0];
+    if (processedTrack) processedTrack.contentHint = "speech";
+  } catch {
+    localStream = localCaptureStream;
+  }
   const analysed = attachAnalyser(localStream);
   if (analysed) {
     localAnalyser = analysed.analyser;
@@ -516,6 +560,12 @@ export function teardownAll(): void {
     for (const track of localStream.getTracks()) track.stop();
     localStream = null;
   }
+  if (localCaptureStream) {
+    for (const track of localCaptureStream.getTracks()) track.stop();
+    localCaptureStream = null;
+  }
+  for (const node of localProcessorNodes) node.disconnect();
+  localProcessorNodes = [];
   localAnalyser = null;
   localDataArray = null;
   playbackBlocked = false;

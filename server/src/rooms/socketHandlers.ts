@@ -14,8 +14,10 @@ import {
   markSocketDisconnected,
   newGameInRoom,
   playCardInRoom,
+  removePlayerFromRoom,
   resolvePendingTrickInRoom,
   restoreRoom,
+  setReplacementSeat,
   startRoom,
   toPublicRoom,
   trickPendingResolution,
@@ -152,6 +154,16 @@ function broadcastRoom(io: Server, code: string): void {
   }
 }
 
+function scheduleTrickResolution(io: Server, code: string): void {
+  setTimeout(() => {
+    const resolved = resolvePendingTrickInRoom(code);
+    if (resolved.ok) {
+      broadcastRoom(io, code);
+      void persistRoom(resolved.value);
+    }
+  }, TRICK_RESOLVE_DELAY_MS);
+}
+
 export function registerRoomHandlers(io: Server, socket: Socket): void {
   socket.on("room:create", async (payload: RoomPayload, ack: Ack<{ code: string }> = noop) => {
     if (
@@ -209,7 +221,9 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       ack({ ok: false, error: "invalid" });
       return;
     }
-    const existing = findRoom(requestedCode)?.players.find((player) => player.deviceId === payload.deviceId);
+    const requestedRoom = findRoom(requestedCode);
+    const existing = requestedRoom?.players.find((player) => player.deviceId === payload.deviceId);
+    const replacementTarget = !existing ? requestedRoom?.replacementForDeviceId ?? null : null;
     let replacedSocketId: string | null = null;
     let acceptedHash = hashResumeToken(payload.nextResumeToken);
     if (existing) {
@@ -236,6 +250,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     }
     bindSocket(socket, result.value.code, payload.deviceId);
     socket.join(result.value.code);
+    if (replacementTarget) await clearTurnMembership(membershipKey(result.value.code, replacementTarget));
     await persistRoom(result.value);
     ack({ ok: true, value: { room: toPublicRoom(result.value) } });
     socket.emit("room:membership-ready", { code: result.value.code });
@@ -316,11 +331,60 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       if (removedSocket) {
         removedSocket.leave(payload.code);
         unbindSocket(removedSocket);
+        removedSocket.disconnect(true);
       }
     }
     void persistOrDelete(payload.code, findRoom(payload.code));
     ack({ ok: true, value: null });
     broadcastRoom(io, payload.code);
+  });
+
+  socket.on("room:replacement", async (payload: RoomPayload, ack: Ack<null> = noop) => {
+    if (
+      typeof payload?.code !== "string" ||
+      typeof payload?.deviceId !== "string" ||
+      (payload.targetDeviceId !== null && typeof payload.targetDeviceId !== "string")
+    ) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    const result = setReplacementSeat(payload.code, payload.deviceId, payload.targetDeviceId);
+    if (!result.ok) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+    void persistRoom(result.value);
+    ack({ ok: true, value: null });
+    broadcastRoom(io, payload.code);
+  });
+
+  socket.on("room:remove-seat", async (payload: RoomPayload, ack: Ack<null> = noop) => {
+    if (
+      typeof payload?.code !== "string" ||
+      typeof payload?.deviceId !== "string" ||
+      typeof payload.targetDeviceId !== "string"
+    ) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    const result = removePlayerFromRoom(payload.code, payload.deviceId, payload.targetDeviceId);
+    if (!result.ok) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+    await clearTurnMembership(membershipKey(payload.code, payload.targetDeviceId));
+    void persistRoom(result.value);
+    ack({ ok: true, value: null });
+    broadcastRoom(io, payload.code);
+    if (trickPendingResolution(result.value)) scheduleTrickResolution(io, payload.code);
   });
 
   socket.on("room:leave", async (payload: RoomPayload) => {
@@ -372,14 +436,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     broadcastRoom(io, payload.code);
 
     if (trickPendingResolution(result.value)) {
-      const code = payload.code;
-      setTimeout(async () => {
-        const resolved = resolvePendingTrickInRoom(code);
-        if (resolved.ok) {
-          broadcastRoom(io, code);
-          void persistRoom(resolved.value);
-        }
-      }, TRICK_RESOLVE_DELAY_MS);
+      scheduleTrickResolution(io, payload.code);
     }
   });
 

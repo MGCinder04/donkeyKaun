@@ -27,6 +27,8 @@ export interface Room {
   players: Player[];
   createdAt: number;
   game: GameState | null;
+  /** A disconnected live-game seat the host has opened for the next new joiner. */
+  replacementForDeviceId: string | null;
   /** deviceIds the host has kicked — blocks rejoin even though a mid-game kick doesn't
    *  splice the player out of `players` (that would desync `GameState.seatOrder`). */
   kickedDeviceIds: Set<string>;
@@ -45,6 +47,7 @@ export interface PublicRoom {
   status: RoomStatus;
   players: PublicPlayer[];
   game: PublicGameState | null;
+  replacementForDeviceId: string | null;
 }
 
 export type RoomErrorCode =
@@ -62,4 +65,6 @@ export type RoomErrorCode =
   | "not_your_card"
   | "must_follow_suit"
   | "kicked"
-  | "session_conflict";
+  | "session_conflict"
+  | "player_connected"
+  | "too_few_players";

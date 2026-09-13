@@ -127,23 +127,32 @@ export function useTrickAnimation(game: PublicGameState): TrickAnimationState {
 
 const ROUND_RECAP_MS = 4500;
 
+export function roundSummaryKey(summary: RoundSummary | null): string {
+  if (!summary) return "";
+  // A round number changes only when another round actually completes. Profile
+  // edits, replacements and seat removals may rewrite names/results in the same
+  // summary and must not replay the recap (or its sound).
+  return String(summary.round);
+}
+
 /** Shows a prominent recap the moment a round completes, then auto-hides — separate
- *  from the small persistent "Round N result" line, which stays up for reference. Keyed
- *  off `lastRoundSummary`'s object identity, which the engine only replaces when a round
- *  actually finishes (not on every unrelated broadcast within the same round). */
+ *  from the small persistent "Round N result" line, which stays up for reference. The
+ *  server serializes a fresh object on every broadcast, so use the completed round
+ *  number—not object identity or mutable result content—as the transition key. */
 export function useRoundRecap(game: PublicGameState): { visible: boolean; summary: RoundSummary | null } {
   const [visible, setVisible] = useState(false);
-  const seenRef = useRef<RoundSummary | null>(null);
+  const summaryKey = roundSummaryKey(game.lastRoundSummary);
+  const seenRef = useRef(summaryKey);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     const summary = game.lastRoundSummary;
-    if (!summary || summary === seenRef.current) return;
-    seenRef.current = summary;
+    if (!summary || summaryKey === seenRef.current) return;
+    seenRef.current = summaryKey;
     setVisible(true);
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setVisible(false), ROUND_RECAP_MS);
-  }, [game.lastRoundSummary]);
+  }, [summaryKey, game.lastRoundSummary]);
 
   useEffect(() => () => clearTimeout(timerRef.current), []);
 

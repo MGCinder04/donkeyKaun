@@ -14,15 +14,17 @@ function App() {
     <BrowserRouter>
       <div className="min-h-screen" style={{ background: "var(--ground)" }}>
         <TopBar />
-        <Suspense fallback={null}>
-          <Routes>
-            <Route path="/" element={<Landing />} />
-            <Route path="/setup" element={<Setup />} />
-            <Route path="/create" element={<Create />} />
-            <Route path="/join" element={<Join />} />
-            <Route path="/room/:code" element={<Room />} />
-          </Routes>
-        </Suspense>
+        <main>
+          <Suspense fallback={null}>
+            <Routes>
+              <Route path="/" element={<Landing />} />
+              <Route path="/setup" element={<Setup />} />
+              <Route path="/create" element={<Create />} />
+              <Route path="/join" element={<Join />} />
+              <Route path="/room/:code" element={<Room />} />
+            </Routes>
+          </Suspense>
+        </main>
       </div>
     </BrowserRouter>
   );

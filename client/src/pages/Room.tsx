@@ -22,6 +22,8 @@ import {
   onRoomState,
   placeBid,
   playCard,
+  removePlayerSeat,
+  setReplacementSeat,
   startRoom,
 } from "../rooms/roomClient";
 import { seatPosition } from "../rooms/seatLayout";
@@ -50,6 +52,7 @@ export function Room() {
   const [starting, setStarting] = useState(false);
   const [hand, setHand] = useState<Card[]>([]);
   const [legalCards, setLegalCards] = useState<Card[]>([]);
+  const [adminNotice, setAdminNotice] = useState<string | null>(null);
   const joinedRef = useRef(false);
   const connected = useConnectionStatus();
 
@@ -134,12 +137,39 @@ export function Room() {
   }
 
   async function handleKick(targetDeviceId: string, targetName: string) {
-    if (!window.confirm(`Remove ${targetName} from the room?`)) return;
-    await kickPlayer(roomCode, identity.deviceId, targetDeviceId);
+    const wording = room?.status === "playing"
+      ? `Disconnect ${targetName}? Their seat will stay reserved until you remove it or choose a replacement.`
+      : `Remove ${targetName} from the room?`;
+    if (!window.confirm(wording)) return;
+    const result = await kickPlayer(roomCode, identity.deviceId, targetDeviceId);
+    if (!result.ok) setAdminNotice(ROOM_ERROR_MESSAGES[result.error] ?? "Couldn't remove that player.");
+  }
+
+  async function handleReplacement(targetDeviceId: string, open: boolean) {
+    const result = await setReplacementSeat(roomCode, identity.deviceId, open ? targetDeviceId : null);
+    setAdminNotice(
+      result.ok
+        ? open
+          ? "Replacement seat opened. Share the usual room link with the new player."
+          : "Replacement seat closed."
+        : ROOM_ERROR_MESSAGES[result.error] ?? "Couldn't change that seat.",
+    );
+  }
+
+  async function handleRemoveSeat(targetDeviceId: string, targetName: string) {
+    if (!window.confirm(`Permanently remove ${targetName}'s seat and discard their remaining cards?`)) return;
+    const result = await removePlayerSeat(roomCode, identity.deviceId, targetDeviceId);
+    setAdminNotice(
+      result.ok
+        ? `${targetName}'s seat was removed. The game can continue.`
+        : ROOM_ERROR_MESSAGES[result.error] ?? "Couldn't remove that seat.",
+    );
   }
 
   function handleLeave() {
-    leaveRoom(roomCode, identity.deviceId);
+    // Leaving the lobby is final. During a game, keep the private resume
+    // credential so this device can reclaim its reserved seat from the link.
+    leaveRoom(roomCode, identity.deviceId, room?.status === "playing");
     navigate("/");
   }
 
@@ -249,14 +279,25 @@ export function Room() {
           Reconnecting…
         </div>
       )}
+      {adminNotice && (
+        <button
+          type="button"
+          onClick={() => setAdminNotice(null)}
+          role="status"
+          className="mx-auto mb-6 block max-w-[min(90vw,32rem)] rounded-2xl border px-5 py-3 text-base font-semibold shadow-xl"
+          style={{ background: "var(--ground-raised)", borderColor: "var(--hairline)", color: "var(--ink)" }}
+        >
+          {adminNotice}
+        </button>
+      )}
       <div className="mb-10 text-center">
         <p
-          className="mb-2 text-xs font-semibold uppercase"
+          className={room.status === "playing" ? "mb-2 text-base font-semibold uppercase" : "mb-2 text-xs font-semibold uppercase"}
           style={{ color: "var(--gold)", letterSpacing: "0.16em" }}
         >
           {room.status === "playing" ? "Game in progress" : "Lobby"}
         </p>
-        <h2 className="text-2xl font-bold sm:text-3xl">
+        <h2 className={room.status === "playing" ? "text-3xl font-bold sm:text-4xl" : "text-2xl font-bold sm:text-3xl"}>
           {room.players.length} of {SEAT_COUNT} players
         </h2>
       </div>
@@ -331,6 +372,10 @@ export function Room() {
           onNewGame={() => newGame(roomCode, identity.deviceId)}
           onContinue={() => continueGame(roomCode, identity.deviceId)}
           onExit={() => exitGame(roomCode, identity.deviceId)}
+          replacementForDeviceId={room.replacementForDeviceId}
+          onKickPlayer={handleKick}
+          onToggleReplacement={handleReplacement}
+          onRemovePlayer={handleRemoveSeat}
           speakingDeviceIds={voiceState.speakingDeviceIds}
           mutedVoiceDeviceIds={voiceState.mutedPeerIds}
           onToggleVoiceMute={voiceState.togglePeerMute}
@@ -353,7 +398,7 @@ export function Room() {
       )}
 
       <div className="mt-10 text-center">
-        <Button variant="ghost" onClick={handleLeave}>
+        <Button variant="ghost" className={room.status === "playing" ? "text-lg" : undefined} onClick={handleLeave}>
           Leave room
         </Button>
       </div>

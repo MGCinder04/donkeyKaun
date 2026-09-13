@@ -6,6 +6,8 @@ import {
   newGame,
   placeBid,
   playCard,
+  removePlayer,
+  replacePlayer,
   resolvePendingTrick,
   startGame,
   type GameState,
@@ -346,5 +348,77 @@ describe("end of game", () => {
     expect(state.scores).toEqual(before.scores);
     expect(state.roundHistory).toEqual([]); // fresh scoresheet even though scores carry over
     expect(state.phase).toBe("bidding");
+  });
+});
+
+describe("live seat administration", () => {
+  it("transfers every part of a seat to a replacement player", () => {
+    const state = startGame(["p1", "p2", "p3"], seededRng(8));
+    state.bids.p2 = 2;
+    state.tricksWon.p2 = 1;
+    state.scores.p2 = 43;
+    state.currentTrick = [{ deviceId: "p2", card: state.hands.p2[0] }];
+    state.lastRoundSummary = {
+      round: 1,
+      trumpSuit: "S",
+      results: [{ deviceId: "p2", bid: 2, tricksWon: 2, roundScore: 32 }],
+    };
+    state.roundHistory = [state.lastRoundSummary];
+
+    const replaced = replacePlayer(state, "p2", "new-player");
+
+    expect(replaced.seatOrder).toEqual(["p1", "new-player", "p3"]);
+    expect(replaced.hands["new-player"]).toEqual(state.hands.p2);
+    expect(replaced.bids["new-player"]).toBe(2);
+    expect(replaced.tricksWon["new-player"]).toBe(1);
+    expect(replaced.scores["new-player"]).toBe(43);
+    expect(replaced.currentTrick[0].deviceId).toBe("new-player");
+    expect(replaced.roundHistory[0].results[0].deviceId).toBe("new-player");
+    expect(replaced.hands.p2).toBeUndefined();
+  });
+
+  it("moves play to the next surviving player when the current player is removed", () => {
+    const state = startGame(["p1", "p2", "p3"], seededRng(9));
+    state.phase = "trick";
+    state.turnSeat = 1;
+    state.currentTrick = [{ deviceId: "p1", card: state.hands.p1[0] }];
+    state.hands.p1 = state.hands.p1.slice(1);
+
+    const reduced = removePlayer(state, "p2");
+
+    expect(reduced.seatOrder).toEqual(["p1", "p3"]);
+    expect(reduced.turnSeat).toBe(1);
+    expect(reduced.seatOrder[reduced.turnSeat]).toBe("p3");
+    expect(reduced.hands.p2).toBeUndefined();
+  });
+
+  it("moves bidding to the next survivor when the current bidder is removed", () => {
+    const state = startGame(["p1", "p2", "p3"], seededRng(11));
+    expect(state.bidOrder[state.bidTurnIndex]).toBe("p2");
+
+    const reduced = removePlayer(state, "p2");
+
+    expect(reduced.phase).toBe("bidding");
+    expect(reduced.bidOrder).toEqual(["p3", "p1"]);
+    expect(reduced.bidOrder[reduced.bidTurnIndex]).toBe("p3");
+    expect(reduced.seatOrder[reduced.turnSeat]).toBe("p3");
+  });
+
+  it("marks the hand complete if removing the waiting player leaves every survivor represented", () => {
+    const state = startGame(["p1", "p2", "p3"], seededRng(10));
+    state.phase = "trick";
+    state.turnSeat = 2;
+    state.currentTrick = [
+      { deviceId: "p1", card: state.hands.p1[0] },
+      { deviceId: "p2", card: state.hands.p2[0] },
+    ];
+    state.hands.p1 = state.hands.p1.slice(1);
+    state.hands.p2 = state.hands.p2.slice(1);
+
+    const reduced = removePlayer(state, "p3");
+
+    expect(reduced.currentTrick).toHaveLength(2);
+    expect(reduced.turnSeat).toBe(-1);
+    expect(resolvePendingTrick(reduced).currentTrick).toEqual([]);
   });
 });

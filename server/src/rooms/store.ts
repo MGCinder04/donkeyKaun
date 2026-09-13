@@ -1,6 +1,16 @@
 import { randomInt } from "node:crypto";
 import type { Card } from "../game/cards.js";
-import { continueGame, isTrickComplete, newGame, placeBid, playCard, resolvePendingTrick, startGame } from "../game/engine.js";
+import {
+  continueGame,
+  isTrickComplete,
+  newGame,
+  placeBid,
+  playCard,
+  removePlayer,
+  replacePlayer,
+  resolvePendingTrick,
+  startGame,
+} from "../game/engine.js";
 import { toPublicGameState } from "../game/publicState.js";
 import type { AvatarChoice, Player, PublicPlayer, PublicRoom, Room, RoomErrorCode } from "./types.js";
 
@@ -82,6 +92,7 @@ export function createRoom(
     players: [player],
     createdAt: Date.now(),
     game: null,
+    replacementForDeviceId: null,
     kickedDeviceIds: new Set(),
   };
   rooms.set(code, room);
@@ -112,10 +123,34 @@ export function joinRoom(
     existing.disconnectedAt = null;
     existing.name = name;
     existing.avatar = avatar;
+    if (room.replacementForDeviceId === deviceId) room.replacementForDeviceId = null;
     return { ok: true, value: room };
   }
 
-  if (room.status !== "lobby") return { ok: false, error: "in_progress" };
+  if (room.status === "playing") {
+    const replacedId = room.replacementForDeviceId;
+    const replaced = room.players.find((player) => player.deviceId === replacedId);
+    if (!replacedId || !replaced || replaced.socketId !== null || !room.game) {
+      return { ok: false, error: "in_progress" };
+    }
+    room.game = replacePlayer(room.game, replacedId, deviceId);
+    room.players = room.players.map((player) =>
+      player.deviceId === replacedId
+        ? {
+            deviceId,
+            name,
+            avatar,
+            resumeTokenHash,
+            socketId,
+            joinedAt: Date.now(),
+            disconnectedAt: null,
+          }
+        : player,
+    );
+    room.kickedDeviceIds.add(replacedId);
+    room.replacementForDeviceId = null;
+    return { ok: true, value: room };
+  }
   if (room.players.length >= MAX_PLAYERS) return { ok: false, error: "full" };
 
   room.players.push({
@@ -145,6 +180,7 @@ export function restoreRoom(room: Room): RoomResult<Room> {
     disconnectedAt: Date.now(),
   }));
   room.kickedDeviceIds = new Set(room.kickedDeviceIds);
+  room.replacementForDeviceId = room.replacementForDeviceId ?? null;
   rooms.set(code, room);
   return { ok: true, value: room };
 }
@@ -261,6 +297,51 @@ export interface KickResult {
   removedSocketId: string | null;
 }
 
+export function setReplacementSeat(
+  code: string,
+  hostDeviceId: string,
+  targetDeviceId: string | null,
+): RoomResult<Room> {
+  const room = findRoom(code);
+  if (!room) return { ok: false, error: "not_found" };
+  if (room.status !== "playing" || !room.game) return { ok: false, error: "not_playing" };
+  const host = toPublicRoom(room).players.find((player) => player.isHost);
+  if (!host || host.deviceId !== hostDeviceId) return { ok: false, error: "not_host" };
+  if (targetDeviceId === null) {
+    room.replacementForDeviceId = null;
+    return { ok: true, value: room };
+  }
+  if (targetDeviceId === hostDeviceId) return { ok: false, error: "invalid" };
+  const target = room.players.find((player) => player.deviceId === targetDeviceId);
+  if (!target) return { ok: false, error: "not_found" };
+  if (target.socketId !== null) return { ok: false, error: "player_connected" };
+  room.replacementForDeviceId = targetDeviceId;
+  return { ok: true, value: room };
+}
+
+export function removePlayerFromRoom(
+  code: string,
+  hostDeviceId: string,
+  targetDeviceId: string,
+): RoomResult<Room> {
+  const room = findRoom(code);
+  if (!room) return { ok: false, error: "not_found" };
+  if (room.status !== "playing" || !room.game) return { ok: false, error: "not_playing" };
+  const host = toPublicRoom(room).players.find((player) => player.isHost);
+  if (!host || host.deviceId !== hostDeviceId) return { ok: false, error: "not_host" };
+  if (targetDeviceId === hostDeviceId) return { ok: false, error: "invalid" };
+  const target = room.players.find((player) => player.deviceId === targetDeviceId);
+  if (!target) return { ok: false, error: "not_found" };
+  if (target.socketId !== null) return { ok: false, error: "player_connected" };
+  if (room.players.length <= MIN_PLAYERS_TO_START) return { ok: false, error: "too_few_players" };
+
+  room.players = room.players.filter((player) => player.deviceId !== targetDeviceId);
+  room.game = removePlayer(room.game, targetDeviceId);
+  room.kickedDeviceIds.add(targetDeviceId);
+  if (room.replacementForDeviceId === targetDeviceId) room.replacementForDeviceId = null;
+  return { ok: true, value: room };
+}
+
 export function kickPlayer(code: string, hostDeviceId: string, targetDeviceId: string): RoomResult<KickResult> {
   const room = findRoom(code);
   if (!room) return { ok: false, error: "not_found" };
@@ -333,7 +414,13 @@ export function toPublicRoom(room: Room): PublicRoom {
     connected: p.socketId !== null,
     isHost: p.deviceId === hostDeviceId,
   }));
-  return { code: room.code, status: room.status, players, game: room.game ? toPublicGameState(room.game) : null };
+  return {
+    code: room.code,
+    status: room.status,
+    players,
+    game: room.game ? toPublicGameState(room.game) : null,
+    replacementForDeviceId: room.replacementForDeviceId,
+  };
 }
 
 /** Periodic sweep: drop long-disconnected players from lobbies (frees the seat), and

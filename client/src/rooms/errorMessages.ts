@@ -16,6 +16,8 @@ export const ROOM_ERROR_MESSAGES: Record<ClientRoomErrorCode, string> = {
   must_follow_suit: "You have to follow suit if you can.",
   kicked: "You were removed from this room and can't rejoin.",
   session_conflict: "This player session is already open elsewhere. Reload this page to take over safely.",
+  player_connected: "That player is connected. Disconnect them before changing their seat.",
+  too_few_players: "At least two players must remain in the game.",
   network: "The game server couldn't be reached. Check your connection and try again.",
   timeout: "The game server took too long to answer. It may still be waking up — try again.",
   unauthorized: "Your private-site access has expired. Reload the page and enter the family passcode again.",

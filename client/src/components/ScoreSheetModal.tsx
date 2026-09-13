@@ -24,16 +24,16 @@ export function ScoreSheetModal({ roundHistory, players, scores, seatOrder, onCl
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-lg font-bold">Scoresheet</h3>
-          <Button variant="ghost" onClick={onClose}>
+          <h3 className="text-2xl font-bold">Scoresheet</h3>
+          <Button variant="ghost" className="text-lg" onClick={onClose}>
             Close
           </Button>
         </div>
 
         {roundHistory.length === 0 ? (
-          <p style={{ color: "var(--ink-dim)" }}>No rounds completed yet.</p>
+          <p className="text-base" style={{ color: "var(--ink-dim)" }}>No rounds completed yet.</p>
         ) : (
-          <table className="w-full border-collapse text-left text-sm">
+          <table className="w-full border-collapse text-left text-lg">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--hairline)" }}>
                 <th className="py-2 pr-3 font-semibold" style={{ color: "var(--ink-faint)" }}>
