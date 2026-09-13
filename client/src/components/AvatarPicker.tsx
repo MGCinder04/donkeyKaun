@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { AVATAR_CATALOG, COLOR_PALETTE } from "../identity/avatarPalette";
+import { useEffect, useState } from "react";
+import { AVATAR_CATALOG, COLOR_PALETTE, findCatalogEntry } from "../identity/avatarPalette";
 import { AvatarImage } from "./AvatarImage";
 import type { AvatarCategory, AvatarSelection } from "../identity/avatarPalette";
 
@@ -20,6 +20,11 @@ export function AvatarPicker({ value, onChange }: AvatarPickerProps) {
   const selected = value ?? { catalogId: AVATAR_CATALOG[0].id, colorKey: COLOR_PALETTE[0].key };
 
   const tiles = AVATAR_CATALOG.filter((entry) => entry.category === tab);
+
+  useEffect(() => {
+    const selectedCategory = findCatalogEntry(value?.catalogId ?? "")?.category;
+    if (selectedCategory) setTab(selectedCategory);
+  }, [value?.catalogId]);
 
   function selectCatalog(catalogId: string) {
     onChange({ catalogId, colorKey: selected.colorKey });
@@ -57,6 +62,7 @@ export function AvatarPicker({ value, onChange }: AvatarPickerProps) {
               key={t.key}
               type="button"
               onClick={() => setTab(t.key)}
+              aria-pressed={tab === t.key}
               className="rounded-full px-4 py-1.5 text-sm font-semibold transition-colors"
               style={{
                 background: tab === t.key ? "var(--gold)" : "var(--ground-raised-2)",
@@ -67,7 +73,7 @@ export function AvatarPicker({ value, onChange }: AvatarPickerProps) {
             </button>
           ))}
         </div>
-        <div className="grid max-h-72 grid-cols-6 gap-2 overflow-y-auto pr-1 sm:grid-cols-8">
+        <div className="grid max-h-72 grid-cols-[repeat(6,minmax(0,1fr))] gap-2 overflow-x-hidden overflow-y-auto pr-1 sm:grid-cols-[repeat(8,minmax(0,1fr))]">
           {tiles.map((entry) => {
             const isSelected = entry.id === selected.catalogId;
             const label =
@@ -89,7 +95,7 @@ export function AvatarPicker({ value, onChange }: AvatarPickerProps) {
                 <AvatarImage
                   catalogId={entry.id}
                   colorKey={selected.colorKey}
-                  size={48}
+                  size={42}
                   className="h-full w-full"
                 />
               </button>

@@ -5,6 +5,7 @@ import { Button } from "../components/Button";
 import { AVATAR_CATALOG, COLOR_PALETTE, findCatalogEntry } from "../identity/avatarPalette";
 import type { AvatarSelection } from "../identity/avatarPalette";
 import { renderDicebearDataUri } from "../identity/dicebearRender";
+import { randomGoofyName } from "../identity/goofyNames";
 import { useIdentity } from "../identity/useIdentity";
 import type { AvatarChoice } from "../identity/useIdentity";
 
@@ -45,6 +46,13 @@ export function Setup() {
 
   const canContinue = name.trim().length > 0;
 
+  function handleRandomize() {
+    const avatar = AVATAR_CATALOG[Math.floor(Math.random() * AVATAR_CATALOG.length)];
+    const color = COLOR_PALETTE[Math.floor(Math.random() * COLOR_PALETTE.length)];
+    setName(randomGoofyName());
+    setSelection({ catalogId: avatar.id, colorKey: color.key });
+  }
+
   function handleContinue() {
     if (!canContinue) return;
     identity.setName(name.trim());
@@ -73,23 +81,28 @@ export function Setup() {
         className="rounded-2xl border p-6 sm:p-8"
         style={{ background: "var(--ground-raised)", borderColor: "var(--hairline)" }}
       >
-        <input
-          id="player-name"
-          name="playerName"
-          autoComplete="name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          maxLength={20}
-          placeholder="Your name"
-          aria-label="Your name"
-          className="mb-6 w-full max-w-[240px] rounded-lg border px-3 py-2.5 text-center outline-none"
-          style={{
-            background: "var(--ground-raised-2)",
-            borderColor: "var(--hairline)",
-            color: "var(--ink)",
-          }}
-          onKeyDown={(e) => e.key === "Enter" && handleContinue()}
-        />
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+          <input
+            id="player-name"
+            name="playerName"
+            autoComplete="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={20}
+            placeholder="Your name"
+            aria-label="Your name"
+            className="w-full rounded-lg border px-3 py-2.5 text-center outline-none sm:max-w-[240px]"
+            style={{
+              background: "var(--ground-raised-2)",
+              borderColor: "var(--hairline)",
+              color: "var(--ink)",
+            }}
+            onKeyDown={(e) => e.key === "Enter" && handleContinue()}
+          />
+          <Button type="button" variant="ghost" className="w-full sm:w-auto" onClick={handleRandomize}>
+            🎲 Surprise me
+          </Button>
+        </div>
         <AvatarPicker value={selection} onChange={setSelection} />
       </div>
 

@@ -1,4 +1,4 @@
-import { type Card, type Suit, TRUMP_ROTATION, cardId, createDeck, rankValue, shuffle } from "./cards.js";
+import { type Card, type Suit, TRUMP_ROTATION, cardId, createDeck, rankValue, shuffle, sortCards } from "./cards.js";
 
 export type GamePhase = "bidding" | "trick" | "game-end";
 
@@ -49,7 +49,7 @@ function dealRound(seatOrder: string[], round: number, dealerSeat: number, rng: 
   const order = orderFrom(seatOrder, dealerSeat + 1);
   const hands: GameState["hands"] = {};
   order.forEach((deviceId, i) => {
-    hands[deviceId] = deck.slice(i * cardsThisRound, (i + 1) * cardsThisRound);
+    hands[deviceId] = sortCards(deck.slice(i * cardsThisRound, (i + 1) * cardsThisRound));
   });
   return hands;
 }

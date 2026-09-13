@@ -6,6 +6,7 @@ import { ScoreSheetModal } from "./ScoreSheetModal";
 import { PlayerAdminModal } from "./PlayerAdminModal";
 import { gameSeatPosition, pileSlotPosition } from "../rooms/gameSeatLayout";
 import { roundSummaryKey, useDealAnimation, useRoundRecap, useTrickAnimation } from "../rooms/gameAnimations";
+import { sortCardsForDisplay } from "../rooms/cardSort";
 import { SUIT_COLOR, SUIT_SYMBOL, cardKey, cardLabel } from "../lib/cardDisplay";
 import {
   playCardSound,
@@ -64,6 +65,7 @@ export function GameTable({
   const [managePlayerId, setManagePlayerId] = useState<string | null>(null);
   const nameFor = (id: string) => players.find((p) => p.deviceId === id)?.name ?? "?";
   const legalKeys = new Set(legalCards.map(cardKey));
+  const sortedHand = useMemo(() => sortCardsForDisplay(hand), [hand]);
   const managedPlayer = players.find((player) => player.deviceId === managePlayerId) ?? null;
   const bidTurnPlayer = players.find((player) => player.deviceId === game.bidTurnDeviceId);
   const playTurnPlayer = players.find((player) => player.deviceId === game.turnDeviceId);
@@ -444,7 +446,7 @@ export function GameTable({
             Your hand
           </p>
           <div className="flex flex-wrap justify-center gap-2">
-            {hand.map((card) => {
+            {sortedHand.map((card) => {
               const legal = !isMyPlayTurn || legalKeys.has(cardKey(card));
               const clickable = isMyPlayTurn && legal;
               return (
