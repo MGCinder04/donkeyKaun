@@ -47,7 +47,7 @@ export function VoiceControl({ state }: VoiceControlProps) {
           type="button"
           onClick={toggleListeningMute}
           aria-pressed={listeningMuted}
-          aria-label={listeningMuted ? "Unmute all players — Muted" : "Mute all players — Listening"}
+          aria-label={listeningMuted ? "Unmute all players" : "Mute all players"}
           className="flex items-center gap-2 rounded-full px-5 py-2.5 text-lg font-semibold"
           style={{
             border: "1px solid var(--hairline)",

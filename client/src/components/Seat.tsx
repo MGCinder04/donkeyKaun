@@ -64,14 +64,6 @@ export function Seat({
             ★
           </span>
         )}
-        {player.botKind && (
-          <span
-            className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full px-1.5 py-0.5 text-[8px] font-black uppercase"
-            style={{ background: "var(--gold)", color: "#1a1206", letterSpacing: "0.08em" }}
-          >
-            bot
-          </span>
-        )}
         {onKick && (
           <button
             type="button"
@@ -87,7 +79,7 @@ export function Seat({
             ✕
           </button>
         )}
-        {onToggleVoiceMute && !player.botKind && (
+        {onToggleVoiceMute && (
           <button
             type="button"
             onClick={(event) => {

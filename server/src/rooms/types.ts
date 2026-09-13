@@ -1,6 +1,5 @@
 import type { GameState } from "../game/engine.js";
 import type { PublicGameState } from "../game/publicState.js";
-import type { BotKind } from "../bots/types.js";
 
 export interface AvatarChoice {
   catalogId: string;
@@ -18,8 +17,6 @@ export interface Player {
   socketId: string | null;
   joinedAt: number;
   disconnectedAt: number | null;
-  /** Server-owned seats have no socket or resume token and can never become host. */
-  botKind?: BotKind | null;
 }
 
 export type RoomStatus = "lobby" | "playing";
@@ -43,7 +40,6 @@ export interface PublicPlayer {
   avatar: AvatarChoice;
   connected: boolean;
   isHost: boolean;
-  botKind: BotKind | null;
 }
 
 export interface PublicRoom {

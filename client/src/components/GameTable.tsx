@@ -15,7 +15,6 @@ import {
   playYourTurnSound,
 } from "../sound/soundEngine";
 import type { Card, PublicGameState, PublicPlayer } from "../rooms/types";
-import type { BotKind } from "../bots/catalog";
 
 interface GameTableProps {
   game: PublicGameState;
@@ -33,7 +32,6 @@ interface GameTableProps {
   onKickPlayer: (deviceId: string, name: string) => Promise<void>;
   onToggleReplacement: (deviceId: string, open: boolean) => Promise<void>;
   onRemovePlayer: (deviceId: string, name: string) => Promise<void>;
-  onBotTakeover: (deviceId: string, kind: BotKind) => Promise<void>;
   speakingDeviceIds?: Set<string>;
   mutedVoiceDeviceIds?: Set<string>;
   onToggleVoiceMute?: (deviceId: string) => void;
@@ -55,7 +53,6 @@ export function GameTable({
   onKickPlayer,
   onToggleReplacement,
   onRemovePlayer,
-  onBotTakeover,
   speakingDeviceIds,
   mutedVoiceDeviceIds,
   onToggleVoiceMute,
@@ -65,8 +62,6 @@ export function GameTable({
   const nameFor = (id: string) => players.find((p) => p.deviceId === id)?.name ?? "?";
   const legalKeys = new Set(legalCards.map(cardKey));
   const managedPlayer = players.find((player) => player.deviceId === managePlayerId) ?? null;
-  const bidTurnPlayer = players.find((player) => player.deviceId === game.bidTurnDeviceId);
-  const playTurnPlayer = players.find((player) => player.deviceId === game.turnDeviceId);
 
   const total = game.seatOrder.length;
   const mySeatIndex = game.seatOrder.indexOf(myDeviceId);
@@ -328,7 +323,7 @@ export function GameTable({
                     D
                   </span>
                 )}
-                {!isSelf && !player?.botKind && onToggleVoiceMute && (
+                {!isSelf && onToggleVoiceMute && (
                   <button
                     type="button"
                     onClick={() => onToggleVoiceMute(id)}
@@ -351,7 +346,7 @@ export function GameTable({
                     onClick={() => setManagePlayerId(id)}
                     aria-label={`Manage ${nameFor(id)}`}
                     title={`Manage ${nameFor(id)}`}
-                    className="absolute -right-3 -bottom-3 flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold"
+                    className="absolute -right-2 -bottom-2 flex h-6 w-6 items-center justify-center rounded-full text-sm font-bold"
                     style={{
                       border: "1px solid var(--hairline)",
                       background: "var(--ground-raised-2)",
@@ -360,9 +355,6 @@ export function GameTable({
                   >
                     ⋯
                   </button>
-                )}
-                {player?.botKind && (
-                  <span className="absolute -top-2 left-1/2 -translate-x-1/2 rounded-full px-1.5 py-0.5 text-[8px] font-black uppercase" style={{ background: "var(--gold)", color: "#1a1206", letterSpacing: "0.08em" }}>bot</span>
                 )}
               </motion.div>
               <span
@@ -395,11 +387,7 @@ export function GameTable({
 
       {!dealing && game.phase === "bidding" && (
         <p className="mb-4 text-lg" style={{ color: "var(--ink-dim)" }}>
-          {isMyBidTurn
-            ? "Your bid — how many hands will you win?"
-            : bidTurnPlayer?.botKind
-              ? `Thinking: ${bidTurnPlayer.name}…`
-              : `Waiting for ${nameFor(game.bidTurnDeviceId ?? "")} to bid…`}
+          {isMyBidTurn ? "Your bid — how many hands will you win?" : `Waiting for ${nameFor(game.bidTurnDeviceId ?? "")} to bid…`}
         </p>
       )}
       {!dealing && game.phase === "trick" && (
@@ -410,9 +398,7 @@ export function GameTable({
               ? "Hand complete…"
               : isMyPlayTurn
                 ? "Your turn — play a card"
-                : playTurnPlayer?.botKind
-                  ? `Thinking: ${playTurnPlayer.name}…`
-                  : `Waiting for ${nameFor(game.turnDeviceId ?? "")}…`}
+                : `Waiting for ${nameFor(game.turnDeviceId ?? "")}…`}
         </p>
       )}
 
@@ -554,10 +540,6 @@ export function GameTable({
           }}
           onRemove={async () => {
             await onRemovePlayer(managedPlayer.deviceId, managedPlayer.name);
-            setManagePlayerId(null);
-          }}
-          onBotTakeover={async (kind) => {
-            await onBotTakeover(managedPlayer.deviceId, kind);
             setManagePlayerId(null);
           }}
           onClose={() => setManagePlayerId(null)}
