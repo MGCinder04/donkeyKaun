@@ -213,19 +213,28 @@ export function GameTable({
           }}
         />
 
-        <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2">
-          <div className="text-base" style={{ color: "var(--ink-dim)" }}>
-            Round {game.round}/8 · Trump{" "}
-            <strong style={{ color: SUIT_COLOR[game.trumpSuit], fontSize: "1.1em" }}>
-              {SUIT_SYMBOL[game.trumpSuit]}
-            </strong>
-          </div>
-          {game.phase === "trick" && !dealing && displayTrick.length === 0 && (
-            <p className="text-base" style={{ color: "var(--ink-faint)" }}>
-              Hand starting…
-            </p>
-          )}
+        <p className="sr-only">
+          Round {game.round} of 8. Trump is {SUIT_SYMBOL[game.trumpSuit]}.
+        </p>
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute left-1/2 top-1/2 z-[1] -translate-x-1/2 -translate-y-1/2 select-none font-serif text-[7.5rem] leading-none sm:text-[10rem]"
+          style={{
+            color: game.trumpSuit === "H" || game.trumpSuit === "D" ? "var(--brick)" : "var(--ink)",
+            opacity: game.trumpSuit === "H" || game.trumpSuit === "D" ? 0.12 : 0.08,
+            textShadow: "0 1px 0 var(--hairline)",
+          }}
+        >
+          {SUIT_SYMBOL[game.trumpSuit]}
         </div>
+        {game.phase === "trick" && !dealing && displayTrick.length === 0 && (
+          <p
+            className="absolute left-1/2 top-[67%] z-[2] -translate-x-1/2 text-base"
+            style={{ color: "var(--ink-faint)" }}
+          >
+            Hand starting…
+          </p>
+        )}
 
         <AnimatePresence>
           {displayTrick.map((t) => {
