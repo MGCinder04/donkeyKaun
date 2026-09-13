@@ -8,12 +8,15 @@ import {
   kickPlayer,
   leaveRoom,
   markSocketDisconnected,
+  normalizeRestoredGameState,
   removePlayerFromRoom,
   removeBot,
   setReplacementSeat,
   startRoom,
   sweepStaleRooms,
 } from "./store.js";
+import { startGame } from "../game/engine.js";
+import { toPublicGameState } from "../game/publicState.js";
 
 const avatar = { catalogId: "cat", colorKey: "gold", kind: "animal" as const, preview: "x" };
 
@@ -289,5 +292,44 @@ describe("server-owned bot seats", () => {
     expect(after.game!.scores[bot.deviceId]).toBe(86);
     expect(after.game!.hands[bot.deviceId]).toEqual(inheritedHand);
     expect(after.game!.seatOrder).not.toContain("take-guest");
+  });
+});
+
+describe("restored card knowledge", () => {
+  it("repairs legacy history and derives void suits from public plays", () => {
+    const game = startGame(["legacy-a", "legacy-b"], () => 0.5);
+    game.phase = "trick";
+    game.tricksWon = { "legacy-a": 1, "legacy-b": 0 };
+    game.currentTrick = [
+      { deviceId: "legacy-a", card: { suit: "H", rank: "A" } },
+      { deviceId: "legacy-b", card: { suit: "S", rank: "2" } },
+    ];
+    (game as unknown as { playHistory: unknown }).playHistory = {
+      complete: "not-a-boolean",
+      plays: [
+        { handNumber: 1, deviceId: "legacy-a", card: { suit: "D", rank: "A" }, leadSuit: "D" },
+        { handNumber: 1, deviceId: "legacy-b", card: { suit: "C", rank: "2" }, leadSuit: "D" },
+        { handNumber: 1, deviceId: "legacy-b", card: { suit: "C", rank: "2" }, leadSuit: "D" },
+        { nonsense: true },
+      ],
+    };
+    game.voidSuits = { "legacy-a": ["S"], "legacy-b": [] };
+
+    normalizeRestoredGameState(game);
+
+    expect(game.playHistory.complete).toBe(false);
+    expect(game.playHistory.plays).toHaveLength(4);
+    expect(game.playHistory.plays.slice(-2).map((play) => play.handNumber)).toEqual([2, 2]);
+    expect(game.voidSuits["legacy-a"]).toEqual([]);
+    expect(game.voidSuits["legacy-b"]).toEqual(["D", "H"]);
+  });
+
+  it("keeps private inference history out of public game state", () => {
+    const game = startGame(["public-a", "public-b"], () => 0.25);
+    const publicGame = toPublicGameState(game) as unknown as Record<string, unknown>;
+
+    expect(publicGame.playHistory).toBeUndefined();
+    expect(publicGame.voidSuits).toBeUndefined();
+    expect(publicGame.hands).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { BOT_PROFILES, type BotKind } from "../bots/types.js";
-import type { Card } from "../game/cards.js";
+import { cardId, createDeck, type Card, type Suit } from "../game/cards.js";
 import {
   continueGame,
   isTrickComplete,
@@ -11,6 +11,8 @@ import {
   replacePlayer,
   resolvePendingTrick,
   startGame,
+  type GameState,
+  type PlayedCardEvent,
 } from "../game/engine.js";
 import { toPublicGameState } from "../game/publicState.js";
 import type { AvatarChoice, Player, PublicPlayer, PublicRoom, Room, RoomErrorCode } from "./types.js";
@@ -26,6 +28,69 @@ const DISCONNECT_GRACE_MS = 10 * 60 * 1000; // 10 min: free-tier reconnects can 
 const MAX_ACTIVE_ROOMS = 20;
 
 const rooms = new Map<string, Room>();
+const VALID_CARD_IDS = new Set(createDeck().map(cardId));
+const VALID_SUITS = new Set<Suit>(["S", "H", "C", "D"]);
+
+function validPlayedCard(value: unknown): value is PlayedCardEvent {
+  if (typeof value !== "object" || value === null) return false;
+  const play = value as Partial<PlayedCardEvent>;
+  return (
+    Number.isInteger(play.handNumber) &&
+    (play.handNumber ?? 0) >= 1 &&
+    typeof play.deviceId === "string" &&
+    typeof play.card === "object" &&
+    play.card !== null &&
+    VALID_CARD_IDS.has(cardId(play.card as Card)) &&
+    VALID_SUITS.has(play.leadSuit as Suit)
+  );
+}
+
+/** Older persisted rooms predate the public card ledger. Normalize whatever is
+ * available and derive suit voids rather than trusting duplicated cached data. */
+export function normalizeRestoredGameState(game: GameState): void {
+  const rawHistory = game.playHistory as unknown;
+  const historyObject = typeof rawHistory === "object" && rawHistory !== null
+    ? rawHistory as { complete?: unknown; plays?: unknown }
+    : null;
+  const seen = new Set<string>();
+  const plays: PlayedCardEvent[] = [];
+  if (Array.isArray(historyObject?.plays)) {
+    for (const candidate of historyObject.plays) {
+      if (!validPlayedCard(candidate)) continue;
+      const id = cardId(candidate.card);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      plays.push({ ...candidate, card: { ...candidate.card } });
+    }
+  }
+
+  const completedHands = Object.values(game.tricksWon ?? {}).reduce((sum, count) => sum + count, 0);
+  const currentHand = completedHands + 1;
+  for (const current of Array.isArray(game.currentTrick) ? game.currentTrick : []) {
+    const id = cardId(current.card);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    plays.push({
+      deviceId: current.deviceId,
+      card: { ...current.card },
+      handNumber: currentHand,
+      leadSuit: game.currentTrick[0]?.card.suit ?? current.card.suit,
+    });
+  }
+
+  game.playHistory = {
+    // Missing legacy history is complete only when no earlier hand was played.
+    complete: historyObject?.complete === true || (!historyObject && completedHands === 0),
+    plays,
+  };
+
+  const voidSuits: Record<string, Suit[]> = Object.fromEntries(game.seatOrder.map((id) => [id, []]));
+  for (const play of plays) {
+    if (!(play.deviceId in voidSuits) || play.card.suit === play.leadSuit) continue;
+    if (!voidSuits[play.deviceId].includes(play.leadSuit)) voidSuits[play.deviceId].push(play.leadSuit);
+  }
+  game.voidSuits = voidSuits;
+}
 
 function isActivePlayer(player: Player): boolean {
   return player.botKind != null || player.socketId !== null;
@@ -205,6 +270,9 @@ export function restoreRoom(room: Room): RoomResult<Room> {
     disconnectedAt: player.botKind ? null : Date.now(),
     botKind: player.botKind ?? null,
   }));
+  if (room.game) {
+    normalizeRestoredGameState(room.game);
+  }
   room.kickedDeviceIds = new Set(room.kickedDeviceIds);
   room.replacementForDeviceId = room.replacementForDeviceId ?? null;
   rooms.set(code, room);
