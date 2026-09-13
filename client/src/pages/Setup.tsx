@@ -8,6 +8,7 @@ import { renderDicebearDataUri } from "../identity/dicebearRender";
 import { randomGoofyName } from "../identity/goofyNames";
 import { useIdentity } from "../identity/useIdentity";
 import type { AvatarChoice } from "../identity/useIdentity";
+import { unlockPrivateAssist } from "../rooms/roomClient";
 
 function resolveAvatarChoice(selection: AvatarSelection): AvatarChoice {
   const entry = findCatalogEntry(selection.catalogId);
@@ -43,8 +44,12 @@ export function Setup() {
   const [selection, setSelection] = useState<AvatarSelection>(
     identity.avatar ?? { catalogId: AVATAR_CATALOG[0].id, colorKey: COLOR_PALETTE[0].key },
   );
+  const [privateNotice, setPrivateNotice] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const canContinue = name.trim().length > 0;
+  const enteredLength = name.trim().length;
+  const isPrivateKeyCandidate = enteredLength >= 24;
+  const canContinue = enteredLength > 0 && (enteredLength <= 20 || isPrivateKeyCandidate);
 
   function handleRandomize() {
     const avatar = AVATAR_CATALOG[Math.floor(Math.random() * AVATAR_CATALOG.length)];
@@ -53,8 +58,26 @@ export function Setup() {
     setSelection({ catalogId: avatar.id, colorKey: color.key });
   }
 
-  function handleContinue() {
+  async function handleContinue() {
     if (!canContinue) return;
+    if (isPrivateKeyCandidate) {
+      setSaving(true);
+      setPrivateNotice("");
+      const result = await unlockPrivateAssist(name.trim());
+      setSaving(false);
+      if (!result.ok) {
+        setPrivateNotice(
+          result.error === "rate_limited"
+            ? "Too many attempts. Try again later."
+            : "That key did not unlock anything.",
+        );
+        return;
+      }
+      setName(identity.name);
+      if (next === "room" && roomCode) navigate(`/room/${roomCode}`);
+      else navigate(-1);
+      return;
+    }
     identity.setName(name.trim());
     identity.setAvatar(resolveAvatarChoice(selection));
     if (next === "room" && roomCode) {
@@ -85,10 +108,14 @@ export function Setup() {
           <input
             id="player-name"
             name="playerName"
-            autoComplete="name"
+            autoComplete="off"
+            type={isPrivateKeyCandidate ? "password" : "text"}
             value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={20}
+            onChange={(e) => {
+              setName(e.target.value);
+              setPrivateNotice("");
+            }}
+            maxLength={64}
             placeholder="Your name"
             aria-label="Your name"
             className="w-full rounded-lg border px-3 py-2.5 text-center outline-none sm:max-w-[240px]"
@@ -97,18 +124,23 @@ export function Setup() {
               borderColor: "var(--hairline)",
               color: "var(--ink)",
             }}
-            onKeyDown={(e) => e.key === "Enter" && handleContinue()}
+            onKeyDown={(e) => e.key === "Enter" && void handleContinue()}
           />
           <Button type="button" variant="ghost" className="w-full sm:w-auto" onClick={handleRandomize}>
             🎲 Surprise me
           </Button>
         </div>
         <AvatarPicker value={selection} onChange={setSelection} />
+        {privateNotice && (
+          <p role="status" className="mt-5 text-center text-sm" style={{ color: "var(--brick)" }}>
+            {privateNotice}
+          </p>
+        )}
       </div>
 
       <div className="mt-8 flex justify-end">
-        <Button variant="primary" disabled={!canContinue} onClick={handleContinue}>
-          {isEditing ? "Save changes" : "Continue"}
+        <Button variant="primary" disabled={!canContinue || saving} onClick={() => void handleContinue()}>
+          {saving ? "Checking…" : isEditing ? "Save changes" : "Continue"}
         </Button>
       </div>
     </section>

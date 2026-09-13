@@ -21,4 +21,5 @@ export const ROOM_ERROR_MESSAGES: Record<ClientRoomErrorCode, string> = {
   network: "The game server couldn't be reached. Check your connection and try again.",
   timeout: "The game server took too long to answer. It may still be waking up — try again.",
   unauthorized: "Your private-site access has expired. Reload the page and enter the family passcode again.",
+  rate_limited: "Too many attempts. Please try again later.",
 };

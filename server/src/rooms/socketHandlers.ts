@@ -2,7 +2,15 @@ import type { Server, Socket } from "socket.io";
 import { hashResumeToken, authorizeResume, isValidResumeToken } from "./membershipTokens.js";
 import { cardId, type Card } from "../game/cards.js";
 import { chooseBid, chooseCard, viewForBot } from "../bots/strategy.js";
-import { BOT_PROFILES, isBotKind } from "../bots/types.js";
+import { BOT_PROFILES, isBotKind, type BotKind } from "../bots/types.js";
+import {
+  clearPrivateAssist,
+  isPrivateAssistEnabled,
+  privateAssistStatus,
+  setPrivateAssistEnabled,
+  unlockPrivateAssist,
+  type PrivateAssistStatus,
+} from "../bots/privateAssist.js";
 import { privateHandFor } from "../game/publicState.js";
 import {
   bidInRoom,
@@ -29,7 +37,7 @@ import {
   updateProfile,
 } from "./store.js";
 import type { PublicRoom, RoomErrorCode } from "./types.js";
-import type { Room } from "./types.js";
+import type { Player, Room } from "./types.js";
 import {
   deletePersistedRoom,
   loadPersistedRoom,
@@ -47,6 +55,9 @@ type VoiceIceAck = (
   response: { ok: true; value: IceServerConfiguration } | { ok: false; error: "unauthorized" },
 ) => void;
 type VoiceSignalAck = (response: { ok: true } | { ok: false; error: "invalid" | "unauthorized" | "target_unavailable" }) => void;
+type PrivateAssistAck = (
+  response: { ok: true; value: PrivateAssistStatus } | { ok: false; error: "unauthorized" | "rate_limited" },
+) => void;
 
 interface RoomPayload {
   code?: unknown;
@@ -60,6 +71,8 @@ interface RoomPayload {
   botKind?: unknown;
   resumeToken?: unknown;
   nextResumeToken?: unknown;
+  secret?: unknown;
+  enabled?: unknown;
 }
 
 function noop() {}
@@ -109,6 +122,7 @@ async function releaseLobbyMembership(io: Server, socket: Socket): Promise<boole
   }
   const room = findRoom(code);
   if (room?.status === "playing") return false;
+  clearPrivateAssist(socket.id);
   socket.leave(code);
   await clearTurnMembership(membershipKey(code, deviceId));
   const updated = leaveRoom(code, deviceId);
@@ -175,12 +189,40 @@ function broadcastRoom(io: Server, code: string): void {
   }
 }
 
-function currentBot(room: Room) {
+interface AutomatedActor {
+  player: Player;
+  botKind: BotKind;
+  privateAssist: boolean;
+}
+
+function currentAutomatedActor(room: Room): AutomatedActor | null {
   if (!room.game || room.game.phase === "game-end" || trickPendingResolution(room)) return null;
   const id = room.game.phase === "bidding"
     ? room.game.bidOrder[room.game.bidTurnIndex]
     : room.game.seatOrder[room.game.turnSeat];
-  return room.players.find((player) => player.deviceId === id && player.botKind) ?? null;
+  const player = room.players.find((candidate) => candidate.deviceId === id);
+  if (!player) return null;
+  if (player.botKind) return { player, botKind: player.botKind, privateAssist: false };
+  if (
+    player.socketId &&
+    isPrivateAssistEnabled(player.socketId, room.code, player.deviceId)
+  ) {
+    return { player, botKind: "ustaad", privateAssist: true };
+  }
+  return null;
+}
+
+function humanLikeDelay(room: Room, actor: AutomatedActor, fingerprint: string): number {
+  if (!actor.privateAssist) return BOT_PROFILES[actor.botKind].delayMs;
+  let hash = 2166136261;
+  for (const character of `${room.code}:${actor.player.deviceId}:${fingerprint}`) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  const jitter = hash >>> 0;
+  return room.game?.phase === "bidding"
+    ? 2_400 + (jitter % 3_201)
+    : 1_300 + (jitter % 2_501);
 }
 
 function scheduleBotTurn(io: Server, code: string): void {
@@ -192,35 +234,36 @@ function scheduleBotTurn(io: Server, code: string): void {
   const room = findRoom(normalized);
   // Bots pause if every human is offline, so an abandoned room cannot play itself.
   if (!room || !room.players.some((player) => !player.botKind && player.socketId !== null)) return;
-  const bot = currentBot(room);
-  if (!bot?.botKind || !room.game) return;
-  const botKind = bot.botKind;
-  const fingerprint = `${room.game.round}:${room.game.phase}:${room.game.bidTurnIndex}:${room.game.turnSeat}:${room.game.currentTrick.length}:${room.game.hands[bot.deviceId]?.length ?? -1}`;
+  const actor = currentAutomatedActor(room);
+  if (!actor || !room.game) return;
+  const { player, botKind, privateAssist } = actor;
+  const fingerprint = `${room.game.round}:${room.game.phase}:${room.game.bidTurnIndex}:${room.game.turnSeat}:${room.game.currentTrick.length}:${room.game.hands[player.deviceId]?.length ?? -1}`;
   const timer = setTimeout(() => {
     botTimers.delete(normalized);
     const latest = findRoom(normalized);
-    const latestBot = latest ? currentBot(latest) : null;
+    const latestActor = latest ? currentAutomatedActor(latest) : null;
     if (
       !latest?.game ||
       !latest.players.some((player) => !player.botKind && player.socketId !== null) ||
-      latestBot?.deviceId !== bot.deviceId ||
-      latestBot.botKind !== botKind
+      latestActor?.player.deviceId !== player.deviceId ||
+      latestActor.botKind !== botKind ||
+      latestActor.privateAssist !== privateAssist
     ) return;
-    const latestFingerprint = `${latest.game.round}:${latest.game.phase}:${latest.game.bidTurnIndex}:${latest.game.turnSeat}:${latest.game.currentTrick.length}:${latest.game.hands[bot.deviceId]?.length ?? -1}`;
+    const latestFingerprint = `${latest.game.round}:${latest.game.phase}:${latest.game.bidTurnIndex}:${latest.game.turnSeat}:${latest.game.currentTrick.length}:${latest.game.hands[player.deviceId]?.length ?? -1}`;
     if (latestFingerprint !== fingerprint) return;
 
-    const view = viewForBot(latest.game, bot.deviceId, botKind);
+    const view = viewForBot(latest.game, player.deviceId, botKind);
     const result = latest.game.phase === "bidding"
-      ? bidInRoom(normalized, bot.deviceId, chooseBid(view))
-      : playCardInRoom(normalized, bot.deviceId, chooseCard(view));
+      ? bidInRoom(normalized, player.deviceId, chooseBid(view))
+      : playCardInRoom(normalized, player.deviceId, chooseCard(view));
     if (!result.ok) {
-      console.warn(`[bots] ${bot.name} could not act in ${normalized}: ${result.error}`);
+      console.warn(`[automation] An automated seat could not act in ${normalized}: ${result.error}`);
       return;
     }
     broadcastRoom(io, normalized);
     void persistRoom(result.value);
     scheduleRoomProgress(io, normalized);
-  }, BOT_PROFILES[botKind].delayMs);
+  }, humanLikeDelay(room, actor, fingerprint));
   botTimers.set(normalized, timer);
 }
 
@@ -266,6 +309,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       ack({ ok: false, error: "invalid" });
       return;
     }
+    clearPrivateAssist(socket.id);
     const result = createRoom(
       payload.name,
       payload.avatar,
@@ -351,6 +395,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     if (replacedSocketId) {
       const replacedSocket = io.sockets.sockets.get(replacedSocketId);
       if (replacedSocket) {
+        clearPrivateAssist(replacedSocket.id);
         replacedSocket.emit("room:replaced", { code: result.value.code });
         replacedSocket.leave(result.value.code);
         unbindSocket(replacedSocket);
@@ -378,6 +423,53 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     void persistRoom(result.value);
     ack({ ok: true, value: null });
     broadcastRoom(io, payload.code);
+  });
+
+  socket.on("private-assist:unlock", (payload: RoomPayload, ack: PrivateAssistAck = noop) => {
+    if (
+      typeof payload?.code !== "string" ||
+      typeof payload?.deviceId !== "string" ||
+      typeof payload?.secret !== "string" ||
+      payload.secret.length > 128 ||
+      !socketOwnsMembership(socket, payload.code, payload.deviceId)
+    ) {
+      ack({ ok: false, error: "unauthorized" });
+      return;
+    }
+    ack(unlockPrivateAssist(
+      socket.id,
+      payload.code,
+      payload.deviceId,
+      payload.secret,
+      socket.handshake.address,
+    ));
+  });
+
+  socket.on("private-assist:status", (payload: RoomPayload, ack: PrivateAssistAck = noop) => {
+    if (
+      typeof payload?.code !== "string" ||
+      typeof payload?.deviceId !== "string" ||
+      !socketOwnsMembership(socket, payload.code, payload.deviceId)
+    ) {
+      ack({ ok: false, error: "unauthorized" });
+      return;
+    }
+    ack({ ok: true, value: privateAssistStatus(socket.id, payload.code, payload.deviceId) });
+  });
+
+  socket.on("private-assist:set", (payload: RoomPayload, ack: PrivateAssistAck = noop) => {
+    if (
+      typeof payload?.code !== "string" ||
+      typeof payload?.deviceId !== "string" ||
+      typeof payload?.enabled !== "boolean" ||
+      !socketOwnsMembership(socket, payload.code, payload.deviceId)
+    ) {
+      ack({ ok: false, error: "unauthorized" });
+      return;
+    }
+    const result = setPrivateAssistEnabled(socket.id, payload.code, payload.deviceId, payload.enabled);
+    ack(result);
+    if (result.ok) scheduleRoomProgress(io, payload.code);
   });
 
   socket.on("room:start", async (payload: RoomPayload, ack: Ack<null> = noop) => {
@@ -421,6 +513,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     const { removedSocketId } = result.value;
     await clearTurnMembership(membershipKey(payload.code, payload.targetDeviceId));
     if (removedSocketId) {
+      clearPrivateAssist(removedSocketId);
       io.to(removedSocketId).emit("room:kicked", { code: payload.code });
       const removedSocket = io.sockets.sockets.get(removedSocketId);
       if (removedSocket) {
@@ -553,6 +646,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
   socket.on("room:leave", async (payload: RoomPayload) => {
     if (typeof payload?.code !== "string" || typeof payload?.deviceId !== "string") return;
     if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) return;
+    clearPrivateAssist(socket.id);
     socket.leave(payload.code);
     await clearTurnMembership(membershipKey(payload.code, payload.deviceId));
     const updated = leaveRoom(payload.code, payload.deviceId);
@@ -664,6 +758,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     for (const player of room?.players ?? []) {
       await clearTurnMembership(membershipKey(code, player.deviceId));
       if (player.socketId) {
+        clearPrivateAssist(player.socketId);
         const playerSocket = io.sockets.sockets.get(player.socketId);
         if (playerSocket) unbindSocket(playerSocket);
       }
@@ -724,6 +819,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
   });
 
   socket.on("disconnect", async () => {
+    clearPrivateAssist(socket.id);
     const room = markSocketDisconnected(socket.id);
     if (room) {
       broadcastRoom(io, room.code);

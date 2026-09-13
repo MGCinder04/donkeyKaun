@@ -84,6 +84,6 @@ export type RoomErrorCode =
   | "player_connected"
   | "too_few_players";
 
-export type ClientRoomErrorCode = RoomErrorCode | "network" | "timeout" | "unauthorized";
+export type ClientRoomErrorCode = RoomErrorCode | "network" | "timeout" | "unauthorized" | "rate_limited";
 
 export type Envelope<T> = { ok: true; value: T } | { ok: false; error: ClientRoomErrorCode };

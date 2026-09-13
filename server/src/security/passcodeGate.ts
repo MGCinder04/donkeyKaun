@@ -150,9 +150,16 @@ export function assertSecureProductionConfig(): void {
   if (process.env.NODE_ENV !== "production") return;
   const passcode = process.env.SITE_PASSCODE ?? "";
   const secret = process.env.SESSION_SECRET ?? "";
+  const privateUstaadSecret = process.env.PRIVATE_USTAAD_SECRET ?? "";
   const origin = process.env.CLIENT_ORIGIN ?? "";
   if (passcode.length < 12) throw new Error("SITE_PASSCODE must be at least 12 characters in production");
   if (secret.length < 32) throw new Error("SESSION_SECRET must be at least 32 characters in production");
+  if (privateUstaadSecret && privateUstaadSecret.length < 24) {
+    throw new Error("PRIVATE_USTAAD_SECRET must be at least 24 characters when enabled");
+  }
+  if (privateUstaadSecret && privateUstaadSecret === passcode) {
+    throw new Error("PRIVATE_USTAAD_SECRET must not match SITE_PASSCODE");
+  }
   try {
     const parsed = new URL(origin);
     if (parsed.protocol !== "https:" || parsed.origin !== origin) throw new Error();

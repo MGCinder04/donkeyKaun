@@ -14,6 +14,7 @@ import {
   addBot,
   exitGame,
   joinRoom,
+  getPrivateAssistState,
   kickPlayer,
   leaveRoom,
   letBotTakeOver,
@@ -21,14 +22,17 @@ import {
   onHand,
   onKicked,
   onMembershipResult,
+  onPrivateAssistState,
   onRoomExited,
   onRoomReplaced,
   onRoomState,
   placeBid,
   playCard,
+  refreshPrivateAssist,
   removePlayerSeat,
   removeBot,
   setReplacementSeat,
+  setPrivateAssist,
   startRoom,
 } from "../rooms/roomClient";
 import { seatPosition } from "../rooms/seatLayout";
@@ -60,6 +64,8 @@ export function Room() {
   const [adminNotice, setAdminNotice] = useState<string | null>(null);
   const [showBotPicker, setShowBotPicker] = useState(false);
   const [addingBot, setAddingBot] = useState(false);
+  const [privateAssist, setPrivateAssistState] = useState(getPrivateAssistState);
+  const [privateAssistBusy, setPrivateAssistBusy] = useState(false);
   const joinedRef = useRef(false);
   const connected = useConnectionStatus();
 
@@ -116,6 +122,12 @@ export function Room() {
     setHand(incoming.hand);
     setLegalCards(incoming.legalCards);
   }), []);
+
+  useEffect(() => onPrivateAssistState(setPrivateAssistState), []);
+
+  useEffect(() => {
+    if (view === "joined") void refreshPrivateAssist(roomCode, identity.deviceId);
+  }, [view, roomCode, identity.deviceId]);
 
   useEffect(() => {
     QRCode.toDataURL(inviteUrl, { margin: 1, width: 176, color: { dark: "#17281f", light: "#f4eedf" } }).then(
@@ -199,6 +211,15 @@ export function Room() {
   async function handleBotTakeover(targetDeviceId: string, kind: BotKind) {
     const result = await letBotTakeOver(roomCode, identity.deviceId, targetDeviceId, kind);
     setAdminNotice(result.ok ? "The bot has taken over that seat." : ROOM_ERROR_MESSAGES[result.error] ?? "Couldn't start bot takeover.");
+  }
+
+  async function handlePrivateAssistToggle() {
+    setPrivateAssistBusy(true);
+    const result = await setPrivateAssist(roomCode, identity.deviceId, !privateAssist.enabled);
+    setPrivateAssistBusy(false);
+    if (!result.ok) {
+      setAdminNotice("Private assist is no longer available. Unlock it again from your profile.");
+    }
   }
 
   async function handleRetryJoin() {
@@ -358,7 +379,7 @@ export function Room() {
                   player={player}
                   position={seatPosition(i, SEAT_COUNT)}
                   isSelf={isSelf}
-                  onClickSelf={isSelf ? () => navigate("/setup") : undefined}
+                  onClickSelf={isSelf ? () => navigate(`/setup?next=room&code=${roomCode}`) : undefined}
                   onKick={
                     player && !isSelf && isHost
                       ? () => player.botKind ? handleRemoveBot(player.deviceId, player.name) : handleKick(player.deviceId, player.name)
@@ -420,6 +441,11 @@ export function Room() {
           speakingDeviceIds={voiceState.speakingDeviceIds}
           mutedVoiceDeviceIds={voiceState.mutedPeerIds}
           onToggleVoiceMute={voiceState.togglePeerMute}
+          privateAssistUnlocked={privateAssist.unlocked}
+          privateAssistEnabled={privateAssist.enabled}
+          privateAssistBusy={privateAssistBusy}
+          onTogglePrivateAssist={() => void handlePrivateAssistToggle()}
+          onEditProfile={() => navigate(`/setup?next=room&code=${roomCode}`)}
         />
       ) : isHost ? (
         <div className="text-center">
