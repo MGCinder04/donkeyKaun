@@ -10,41 +10,17 @@ export const DICEBEAR_STYLE_KEYS = [
   "thumbs",
 ] as const;
 
-const MALE_SEEDS = [
+const ORIGINAL_MALE_SEEDS = [
   "Dev", "Aarav", "Rohan", "Karan", "Vikram", "Sameer", "Ishaan", "Nikhil", "Arjun", "Rahul",
 ];
 
-const FEMALE_SEEDS = [
+const ORIGINAL_FEMALE_SEEDS = [
   "Amara", "Zoya", "Leela", "Priya", "Anaya", "Kavya", "Meera", "Sana", "Riya", "Naina",
 ];
 
-const ALL_SEEDS = [...MALE_SEEDS, ...FEMALE_SEEDS];
+const ALL_SEEDS = [...ORIGINAL_MALE_SEEDS, ...ORIGINAL_FEMALE_SEEDS];
 
 type DicebearStyleKey = (typeof DICEBEAR_STYLE_KEYS)[number];
-
-/**
- * DiceBear seeds do not encode gender: the same seed can produce different
- * presentations in different styles. These lists were curated by visually
- * reviewing every style/seed combination. Abstract faces belong in Misc
- * instead of being misleadingly filed under Male or Female.
- */
-const MALE_PRESENTATION: Partial<Record<DicebearStyleKey, readonly string[]>> = {
-  adventurer: ["Aarav", "Rohan", "Karan", "Ishaan", "Nikhil", "Rahul", "Meera", "Sana", "Naina"],
-  avataaars: ["Aarav", "Rohan", "Karan", "Nikhil", "Rahul", "Zoya", "Priya", "Anaya", "Meera", "Naina"],
-  bigSmile: ["Dev", "Rohan", "Priya", "Anaya", "Kavya", "Meera", "Sana", "Riya"],
-  notionists: ["Dev", "Rohan", "Karan", "Vikram", "Sameer", "Rahul", "Amara", "Zoya", "Anaya", "Kavya", "Meera", "Riya", "Naina"],
-  openPeeps: ["Dev", "Karan", "Sameer", "Arjun", "Rahul", "Leela", "Kavya", "Sana", "Naina"],
-  personas: ["Rohan", "Sameer", "Nikhil", "Zoya", "Leela", "Priya", "Anaya", "Meera", "Sana"],
-};
-
-const FEMALE_PRESENTATION: Partial<Record<DicebearStyleKey, readonly string[]>> = {
-  adventurer: ["Dev", "Vikram", "Sameer", "Arjun", "Amara", "Zoya", "Leela", "Priya", "Anaya", "Kavya", "Riya"],
-  avataaars: ["Dev", "Vikram", "Sameer", "Ishaan", "Arjun", "Amara", "Leela", "Kavya", "Sana", "Riya"],
-  bigSmile: ["Aarav", "Karan", "Vikram", "Sameer", "Ishaan", "Nikhil", "Arjun", "Rahul", "Amara", "Zoya", "Leela", "Naina"],
-  notionists: ["Aarav", "Ishaan", "Nikhil", "Arjun", "Leela", "Priya", "Sana"],
-  openPeeps: ["Aarav", "Rohan", "Vikram", "Ishaan", "Nikhil", "Amara", "Zoya", "Priya", "Anaya", "Meera", "Riya"],
-  personas: ["Dev", "Aarav", "Karan", "Vikram", "Ishaan", "Arjun", "Rahul", "Amara", "Kavya", "Riya", "Naina"],
-};
 
 const ANIMAL_EMOJI = [
   "🦊", "🐼", "🦁", "🐨", "🐯", "🦉", "🐻", "🐺", "🐸", "🐵",
@@ -59,7 +35,7 @@ const MISC_EMOJI = [
   "🎩", "🕶️", "🎭", "🔥",
 ];
 
-export type AvatarCategory = "male" | "female" | "animal" | "misc";
+export type AvatarCategory = "people" | "animal" | "misc";
 
 export interface CatalogEntry {
   id: string;
@@ -70,29 +46,20 @@ export interface CatalogEntry {
   emoji?: string;
 }
 
-function categoryFor(styleKey: DicebearStyleKey, seed: string): AvatarCategory {
-  if (MALE_PRESENTATION[styleKey]?.includes(seed)) return "male";
-  if (FEMALE_PRESENTATION[styleKey]?.includes(seed)) return "female";
-  return "misc";
-}
-
 function legacyCatalogId(styleKey: DicebearStyleKey, seed: string): string {
   // Preserve IDs so already-saved avatars continue to resolve after recategorizing.
-  return `${styleKey}-${MALE_SEEDS.includes(seed) ? "m" : "f"}-${seed}`;
+  return `${styleKey}-${ORIGINAL_MALE_SEEDS.includes(seed) ? "m" : "f"}-${seed}`;
 }
 
 const DICEBEAR_CATALOG: CatalogEntry[] = DICEBEAR_STYLE_KEYS.flatMap((styleKey) =>
   ALL_SEEDS.map((seed) => ({
     id: legacyCatalogId(styleKey, seed),
     kind: "dicebear" as const,
-    category: categoryFor(styleKey, seed),
+    category: "people" as const,
     styleKey,
     seed,
   })),
 );
-
-export const MALE_CATALOG: CatalogEntry[] = DICEBEAR_CATALOG.filter((entry) => entry.category === "male");
-export const FEMALE_CATALOG: CatalogEntry[] = DICEBEAR_CATALOG.filter((entry) => entry.category === "female");
 
 export const ANIMAL_CATALOG: CatalogEntry[] = ANIMAL_EMOJI.map((emoji, i) => ({
   id: `animal-${i}`,
@@ -104,7 +71,7 @@ export const ANIMAL_CATALOG: CatalogEntry[] = ANIMAL_EMOJI.map((emoji, i) => ({
 export const MISC_CATALOG: CatalogEntry[] = MISC_EMOJI.map((emoji, i) => ({
   id: `misc-${i}`,
   kind: "animal" as const,
-  category: emoji === "🧜‍♀️" ? "female" as const : emoji === "🐉" || emoji === "🦄" ? "animal" as const : "misc" as const,
+  category: emoji === "🐉" || emoji === "🦄" ? "animal" as const : "misc" as const,
   emoji,
 }));
 

@@ -9,14 +9,13 @@ interface AvatarPickerProps {
 }
 
 const CATEGORY_TABS: Array<{ key: AvatarCategory; label: string }> = [
-  { key: "male", label: "Male" },
-  { key: "female", label: "Female" },
+  { key: "people", label: "People" },
   { key: "animal", label: "Animal" },
   { key: "misc", label: "Misc" },
 ];
 
 export function AvatarPicker({ value, onChange }: AvatarPickerProps) {
-  const [tab, setTab] = useState<AvatarCategory>("male");
+  const [tab, setTab] = useState<AvatarCategory>("people");
   const selected = value ?? { catalogId: AVATAR_CATALOG[0].id, colorKey: COLOR_PALETTE[0].key };
 
   const tiles = AVATAR_CATALOG.filter((entry) => entry.category === tab);
