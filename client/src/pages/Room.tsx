@@ -5,14 +5,18 @@ import { Button } from "../components/Button";
 import { Seat } from "../components/Seat";
 import { GameTable } from "../components/GameTable";
 import { VoiceControl } from "../components/VoiceControl";
+import { BotPickerModal } from "../components/BotPickerModal";
+import type { BotKind } from "../bots/catalog";
 import { useVoiceChat } from "../voice/useVoiceChat";
 import { useIdentity, hasCompleteProfile } from "../identity/useIdentity";
 import {
   continueGame,
+  addBot,
   exitGame,
   joinRoom,
   kickPlayer,
   leaveRoom,
+  letBotTakeOver,
   newGame,
   onHand,
   onKicked,
@@ -23,6 +27,7 @@ import {
   placeBid,
   playCard,
   removePlayerSeat,
+  removeBot,
   setReplacementSeat,
   startRoom,
 } from "../rooms/roomClient";
@@ -53,6 +58,8 @@ export function Room() {
   const [hand, setHand] = useState<Card[]>([]);
   const [legalCards, setLegalCards] = useState<Card[]>([]);
   const [adminNotice, setAdminNotice] = useState<string | null>(null);
+  const [showBotPicker, setShowBotPicker] = useState(false);
+  const [addingBot, setAddingBot] = useState(false);
   const joinedRef = useRef(false);
   const connected = useConnectionStatus();
 
@@ -117,7 +124,7 @@ export function Room() {
   }, [inviteUrl]);
 
   const peerDeviceIds =
-    room?.players.filter((p) => p.connected && p.deviceId !== identity.deviceId).map((p) => p.deviceId) ?? [];
+    room?.players.filter((p) => p.connected && !p.botKind && p.deviceId !== identity.deviceId).map((p) => p.deviceId) ?? [];
   const voiceState = useVoiceChat(roomCode, identity.deviceId, peerDeviceIds);
 
   function handleCopy() {
@@ -171,6 +178,27 @@ export function Room() {
     // credential so this device can reclaim its reserved seat from the link.
     leaveRoom(roomCode, identity.deviceId, room?.status === "playing");
     navigate("/");
+  }
+
+  async function handleAddBot(kind: BotKind) {
+    setAddingBot(true);
+    const result = await addBot(roomCode, identity.deviceId, kind);
+    setAddingBot(false);
+    if (result.ok) {
+      setShowBotPicker(false);
+      setAdminNotice("Bot joined the table.");
+    } else setAdminNotice(ROOM_ERROR_MESSAGES[result.error] ?? "Couldn't add that bot.");
+  }
+
+  async function handleRemoveBot(targetDeviceId: string, targetName: string) {
+    if (!window.confirm(`Remove ${targetName} from the table?`)) return;
+    const result = await removeBot(roomCode, identity.deviceId, targetDeviceId);
+    setAdminNotice(result.ok ? `${targetName} left the table.` : ROOM_ERROR_MESSAGES[result.error] ?? "Couldn't remove that bot.");
+  }
+
+  async function handleBotTakeover(targetDeviceId: string, kind: BotKind) {
+    const result = await letBotTakeOver(roomCode, identity.deviceId, targetDeviceId, kind);
+    setAdminNotice(result.ok ? "The bot has taken over that seat." : ROOM_ERROR_MESSAGES[result.error] ?? "Couldn't start bot takeover.");
   }
 
   async function handleRetryJoin() {
@@ -280,15 +308,14 @@ export function Room() {
         </div>
       )}
       {adminNotice && (
-        <button
-          type="button"
-          onClick={() => setAdminNotice(null)}
+        <div
           role="status"
-          className="mx-auto mb-6 block max-w-[min(90vw,32rem)] rounded-2xl border px-5 py-3 text-base font-semibold shadow-xl"
+          className="mx-auto mb-6 flex max-w-[min(90vw,32rem)] items-center justify-between gap-3 rounded-2xl border px-5 py-3 text-base font-semibold shadow-xl"
           style={{ background: "var(--ground-raised)", borderColor: "var(--hairline)", color: "var(--ink)" }}
         >
-          {adminNotice}
-        </button>
+          <span>{adminNotice}</span>
+          <button type="button" onClick={() => setAdminNotice(null)} aria-label="Dismiss notification" className="h-10 w-10 shrink-0 rounded-full text-xl" style={{ color: "var(--ink-dim)" }}>×</button>
+        </div>
       )}
       <div className="mb-10 text-center">
         <p
@@ -303,6 +330,17 @@ export function Room() {
       </div>
 
       <VoiceControl state={voiceState} />
+
+      {room.status !== "playing" && isHost && (
+        <div className="mb-6 text-center">
+          <Button variant="ghost" disabled={room.players.length >= SEAT_COUNT} onClick={() => setShowBotPicker(true)}>
+            🤖 Invite a bot
+          </Button>
+          <p className="mt-2 text-xs" style={{ color: "var(--ink-faint)" }}>
+            Add one bot for a duel, or fill the table and play solo.
+          </p>
+        </div>
+      )}
 
       {room.status !== "playing" && (
         <>
@@ -322,12 +360,14 @@ export function Room() {
                   isSelf={isSelf}
                   onClickSelf={isSelf ? () => navigate("/setup") : undefined}
                   onKick={
-                    player && !isSelf && isHost ? () => handleKick(player.deviceId, player.name) : undefined
+                    player && !isSelf && isHost
+                      ? () => player.botKind ? handleRemoveBot(player.deviceId, player.name) : handleKick(player.deviceId, player.name)
+                      : undefined
                   }
                   speaking={player ? voiceState.speakingDeviceIds.has(player.deviceId) : false}
                   voiceMuted={player ? voiceState.mutedPeerIds.has(player.deviceId) : false}
                   onToggleVoiceMute={
-                    player && !isSelf ? () => voiceState.togglePeerMute(player.deviceId) : undefined
+                    player && !isSelf && !player.botKind ? () => voiceState.togglePeerMute(player.deviceId) : undefined
                   }
                 />
               );
@@ -376,6 +416,7 @@ export function Room() {
           onKickPlayer={handleKick}
           onToggleReplacement={handleReplacement}
           onRemovePlayer={handleRemoveSeat}
+          onBotTakeover={handleBotTakeover}
           speakingDeviceIds={voiceState.speakingDeviceIds}
           mutedVoiceDeviceIds={voiceState.mutedPeerIds}
           onToggleVoiceMute={voiceState.togglePeerMute}
@@ -402,6 +443,10 @@ export function Room() {
           Leave room
         </Button>
       </div>
+
+      {showBotPicker && (
+        <BotPickerModal busy={addingBot} onChoose={handleAddBot} onClose={() => setShowBotPicker(false)} />
+      )}
     </section>
   );
 }

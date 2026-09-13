@@ -97,7 +97,8 @@ export function roomFromSnapshot(value: unknown): Room | null {
       ...player,
       resumeTokenHash: player.resumeTokenHash ?? "",
       socketId: null,
-      disconnectedAt: Date.now(),
+      disconnectedAt: player.botKind ? null : Date.now(),
+      botKind: player.botKind ?? null,
     })),
   } as Room;
 }

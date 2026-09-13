@@ -1,4 +1,5 @@
 import type { AvatarChoice } from "../identity/useIdentity";
+import type { BotKind } from "../bots/catalog";
 
 export type RoomStatus = "lobby" | "playing";
 
@@ -53,6 +54,7 @@ export interface PublicPlayer {
   avatar: AvatarChoice;
   connected: boolean;
   isHost: boolean;
+  botKind: BotKind | null;
 }
 
 export interface PublicRoom {

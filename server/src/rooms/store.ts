@@ -1,4 +1,5 @@
-import { randomInt } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
+import { BOT_PROFILES, type BotKind } from "../bots/types.js";
 import type { Card } from "../game/cards.js";
 import {
   continueGame,
@@ -25,6 +26,29 @@ const DISCONNECT_GRACE_MS = 10 * 60 * 1000; // 10 min: free-tier reconnects can 
 const MAX_ACTIVE_ROOMS = 20;
 
 const rooms = new Map<string, Room>();
+
+function isActivePlayer(player: Player): boolean {
+  return player.botKind != null || player.socketId !== null;
+}
+
+function requireHost(room: Room, deviceId: string): RoomErrorCode | null {
+  const host = toPublicRoom(room).players.find((player) => player.isHost);
+  return host?.deviceId === deviceId ? null : "not_host";
+}
+
+function botAvatar(kind: BotKind): AvatarChoice {
+  const profile = BOT_PROFILES[kind];
+  return { catalogId: `bot-${kind}`, colorKey: "gold", kind: "animal", preview: profile.emoji };
+}
+
+function uniqueBotName(room: Room, kind: BotKind): string {
+  const base = BOT_PROFILES[kind].name;
+  const used = new Set(room.players.map((player) => player.name.toLocaleLowerCase()));
+  if (!used.has(base.toLocaleLowerCase())) return base;
+  let suffix = 2;
+  while (used.has(`${base} ${suffix}`.toLocaleLowerCase())) suffix += 1;
+  return `${base} ${suffix}`;
+}
 
 export type RoomResult<T> = { ok: true; value: T } | { ok: false; error: RoomErrorCode };
 
@@ -119,6 +143,7 @@ export function joinRoom(
 
   const existing = room.players.find((p) => p.deviceId === deviceId);
   if (existing) {
+    if (existing.botKind) return { ok: false, error: "invalid" };
     existing.socketId = socketId;
     existing.disconnectedAt = null;
     existing.name = name;
@@ -177,7 +202,8 @@ export function restoreRoom(room: Room): RoomResult<Room> {
     ...player,
     resumeTokenHash: player.resumeTokenHash ?? "",
     socketId: null,
-    disconnectedAt: Date.now(),
+    disconnectedAt: player.botKind ? null : Date.now(),
+    botKind: player.botKind ?? null,
   }));
   room.kickedDeviceIds = new Set(room.kickedDeviceIds);
   room.replacementForDeviceId = room.replacementForDeviceId ?? null;
@@ -211,7 +237,7 @@ export function startRoom(code: string, deviceId: string): RoomResult<Room> {
   const publicRoom = toPublicRoom(room);
   const host = publicRoom.players.find((p) => p.isHost);
   if (!host || host.deviceId !== deviceId) return { ok: false, error: "not_host" };
-  const connectedPlayers = room.players.filter((player) => player.socketId !== null);
+  const connectedPlayers = room.players.filter(isActivePlayer);
   if (connectedPlayers.length < MIN_PLAYERS_TO_START || connectedPlayers.length > MAX_PLAYERS) {
     return { ok: false, error: "cant_start" };
   }
@@ -297,6 +323,69 @@ export interface KickResult {
   removedSocketId: string | null;
 }
 
+export function addBot(code: string, hostDeviceId: string, kind: BotKind): RoomResult<Room> {
+  const room = findRoom(code);
+  if (!room) return { ok: false, error: "not_found" };
+  if (requireHost(room, hostDeviceId)) return { ok: false, error: "not_host" };
+  if (room.status !== "lobby") return { ok: false, error: "in_progress" };
+  if (room.players.length >= MAX_PLAYERS) return { ok: false, error: "full" };
+
+  room.players.push({
+    deviceId: `bot-${randomUUID()}`,
+    name: uniqueBotName(room, kind),
+    avatar: botAvatar(kind),
+    resumeTokenHash: "",
+    socketId: null,
+    joinedAt: Date.now(),
+    disconnectedAt: null,
+    botKind: kind,
+  });
+  return { ok: true, value: room };
+}
+
+export function removeBot(code: string, hostDeviceId: string, targetDeviceId: string): RoomResult<Room> {
+  const room = findRoom(code);
+  if (!room) return { ok: false, error: "not_found" };
+  if (requireHost(room, hostDeviceId)) return { ok: false, error: "not_host" };
+  const target = room.players.find((player) => player.deviceId === targetDeviceId);
+  if (!target?.botKind) return { ok: false, error: "invalid" };
+  if (room.status === "playing") return removePlayerFromRoom(code, hostDeviceId, targetDeviceId);
+  room.players = room.players.filter((player) => player.deviceId !== targetDeviceId);
+  return { ok: true, value: room };
+}
+
+/** Transfer a disconnected human's exact live seat to a server-owned bot. */
+export function botTakeover(
+  code: string,
+  hostDeviceId: string,
+  targetDeviceId: string,
+  kind: BotKind,
+): RoomResult<Room> {
+  const room = findRoom(code);
+  if (!room) return { ok: false, error: "not_found" };
+  if (requireHost(room, hostDeviceId)) return { ok: false, error: "not_host" };
+  if (room.status !== "playing" || !room.game) return { ok: false, error: "not_playing" };
+  const target = room.players.find((player) => player.deviceId === targetDeviceId);
+  if (!target) return { ok: false, error: "not_found" };
+  if (target.socketId !== null || target.botKind) return { ok: false, error: "player_connected" };
+
+  const botId = `bot-${randomUUID()}`;
+  room.game = replacePlayer(room.game, targetDeviceId, botId);
+  room.players = room.players.map((player) => player.deviceId === targetDeviceId ? {
+    deviceId: botId,
+    name: uniqueBotName(room, kind),
+    avatar: botAvatar(kind),
+    resumeTokenHash: "",
+    socketId: null,
+    joinedAt: player.joinedAt,
+    disconnectedAt: null,
+    botKind: kind,
+  } : player);
+  room.kickedDeviceIds.add(targetDeviceId);
+  if (room.replacementForDeviceId === targetDeviceId) room.replacementForDeviceId = null;
+  return { ok: true, value: room };
+}
+
 export function setReplacementSeat(
   code: string,
   hostDeviceId: string,
@@ -332,7 +421,7 @@ export function removePlayerFromRoom(
   if (targetDeviceId === hostDeviceId) return { ok: false, error: "invalid" };
   const target = room.players.find((player) => player.deviceId === targetDeviceId);
   if (!target) return { ok: false, error: "not_found" };
-  if (target.socketId !== null) return { ok: false, error: "player_connected" };
+  if (target.socketId !== null && !target.botKind) return { ok: false, error: "player_connected" };
   if (room.players.length <= MIN_PLAYERS_TO_START) return { ok: false, error: "too_few_players" };
 
   room.players = room.players.filter((player) => player.deviceId !== targetDeviceId);
@@ -411,8 +500,9 @@ export function toPublicRoom(room: Room): PublicRoom {
     deviceId: p.deviceId,
     name: p.name,
     avatar: p.avatar,
-    connected: p.socketId !== null,
+    connected: isActivePlayer(p),
     isHost: p.deviceId === hostDeviceId,
+    botKind: p.botKind ?? null,
   }));
   return {
     code: room.code,
@@ -441,11 +531,12 @@ export function sweepStaleRooms(): RoomSweepResult {
     const playerCountBefore = room.players.length;
     if (room.status === "lobby") {
       room.players = room.players.filter(
-        (p) => p.socketId !== null || p.disconnectedAt === null || now - p.disconnectedAt < DISCONNECT_GRACE_MS,
+        (p) => p.botKind != null || p.socketId !== null || p.disconnectedAt === null || now - p.disconnectedAt < DISCONNECT_GRACE_MS,
       );
     }
-    const abandoned = room.players.every(
-      (p) => p.socketId === null && p.disconnectedAt !== null && now - p.disconnectedAt >= DISCONNECT_GRACE_MS,
+    const humans = room.players.filter((p) => !p.botKind);
+    const abandoned = humans.length === 0 || humans.every(
+      (p) => !p.botKind && p.socketId === null && p.disconnectedAt !== null && now - p.disconnectedAt >= DISCONNECT_GRACE_MS,
     );
     if (room.players.length === 0 || abandoned) {
       rooms.delete(room.code);

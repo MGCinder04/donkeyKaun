@@ -8,6 +8,7 @@ import {
   storeCreatedMembership,
 } from "./membershipCredentials";
 import type { Card, ClientRoomErrorCode, Envelope, PrivateHand, PublicRoom } from "./types";
+import type { BotKind } from "../bots/catalog";
 
 const CONNECT_TIMEOUT_MS = 12_000;
 const ACK_TIMEOUT_MS = 10_000;
@@ -153,6 +154,18 @@ export function onMembershipResult(cb: (event: MembershipResultEvent) => void): 
 
 export function startRoom(code: string, deviceId: string) {
   return request<null>("room:start", { code, deviceId });
+}
+
+export function addBot(code: string, hostDeviceId: string, botKind: BotKind) {
+  return request<null>("room:add-bot", { code, deviceId: hostDeviceId, botKind });
+}
+
+export function removeBot(code: string, hostDeviceId: string, targetDeviceId: string) {
+  return request<null>("room:remove-bot", { code, deviceId: hostDeviceId, targetDeviceId });
+}
+
+export function letBotTakeOver(code: string, hostDeviceId: string, targetDeviceId: string, botKind: BotKind) {
+  return request<null>("room:bot-takeover", { code, deviceId: hostDeviceId, targetDeviceId, botKind });
 }
 
 export function kickPlayer(code: string, hostDeviceId: string, targetDeviceId: string) {

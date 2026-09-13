@@ -183,12 +183,12 @@ Each milestone ends with a checklist below and a demo for live testing before me
       socket acknowledgements, authoritative reconnect state, and automatic voice-peer
       rebuilding after membership is restored
 
-### M7 — Bots (next)
-- [ ] Bot seat creation and host controls
-- [ ] Legal-play engine adapter using the existing replacement-seat seam
-- [ ] Bidding strategy and progressively stronger play strategies
-- [ ] Solo game against bots and bot takeover for a disconnected player
-- [ ] Deterministic bot tests plus difficulty/fairness tuning (bots never inspect cards
+### M7 — Bots ✅
+- [x] Bot seat creation and host controls
+- [x] Legal-play engine adapter using the existing replacement-seat seam
+- [x] Bidding strategy and progressively stronger play strategies
+- [x] Solo game against bots and bot takeover for a disconnected player
+- [x] Deterministic bot tests plus difficulty/fairness tuning (bots never inspect cards
       that a human in the same seat could not see)
 
 ## 6. Git workflow (for you to run day-to-day)
