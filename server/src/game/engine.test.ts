@@ -358,6 +358,13 @@ describe("live seat administration", () => {
     state.tricksWon.p2 = 1;
     state.scores.p2 = 43;
     state.currentTrick = [{ deviceId: "p2", card: state.hands.p2[0] }];
+    state.playHistory.plays = [{
+      handNumber: 1,
+      deviceId: "p2",
+      card: state.hands.p2[0],
+      leadSuit: state.hands.p2[0].suit,
+    }];
+    state.voidSuits.p2 = ["D"];
     state.lastRoundSummary = {
       round: 1,
       trumpSuit: "S",
@@ -373,6 +380,8 @@ describe("live seat administration", () => {
     expect(replaced.tricksWon["new-player"]).toBe(1);
     expect(replaced.scores["new-player"]).toBe(43);
     expect(replaced.currentTrick[0].deviceId).toBe("new-player");
+    expect(replaced.playHistory.plays[0].deviceId).toBe("new-player");
+    expect(replaced.voidSuits["new-player"]).toEqual(["D"]);
     expect(replaced.roundHistory[0].results[0].deviceId).toBe("new-player");
     expect(replaced.hands.p2).toBeUndefined();
   });
@@ -390,6 +399,18 @@ describe("live seat administration", () => {
     expect(reduced.turnSeat).toBe(1);
     expect(reduced.seatOrder[reduced.turnSeat]).toBe("p3");
     expect(reduced.hands.p2).toBeUndefined();
+  });
+
+  it("retains a removed player's publicly played cards for deck counting", () => {
+    const state = startGame(["p1", "p2", "p3"], seededRng(19));
+    const exposed = state.hands.p2[0];
+    state.playHistory.plays = [{ handNumber: 1, deviceId: "p2", card: exposed, leadSuit: exposed.suit }];
+
+    const reduced = removePlayer(state, "p2");
+
+    expect(reduced.playHistory.plays).toEqual([
+      { handNumber: 1, deviceId: "p2", card: exposed, leadSuit: exposed.suit },
+    ]);
   });
 
   it("moves bidding to the next survivor when the current bidder is removed", () => {
@@ -420,5 +441,33 @@ describe("live seat administration", () => {
     expect(reduced.currentTrick).toHaveLength(2);
     expect(reduced.turnSeat).toBe(-1);
     expect(resolvePendingTrick(reduced).currentTrick).toEqual([]);
+  });
+
+  it("keeps hand numbers monotonic after removing a player who won an earlier hand", () => {
+    const state = startGame(["p1", "p2", "p3"], seededRng(27));
+    state.phase = "trick";
+    state.tricksWon.p2 = 1;
+    state.playHistory.plays = [
+      { handNumber: 1, deviceId: "p1", card: c("S", "2"), leadSuit: "S" },
+      { handNumber: 1, deviceId: "p2", card: c("S", "A"), leadSuit: "S" },
+      { handNumber: 1, deviceId: "p3", card: c("S", "3"), leadSuit: "S" },
+    ];
+    state.turnSeat = 0;
+
+    const reduced = removePlayer(state, "p2");
+    const next = playCard(reduced, "p1", reduced.hands.p1[0]);
+
+    expect(next.ok).toBe(true);
+    if (next.ok) expect(next.value.playHistory.plays.at(-1)?.handNumber).toBe(2);
+  });
+
+  it("leaves an incomplete trick unchanged when resolution is requested", () => {
+    const state = startGame(["p1", "p2", "p3"], seededRng(31));
+    state.phase = "trick";
+    state.turnSeat = 0;
+    const oneCard = playCard(state, "p1", state.hands.p1[0]);
+    if (!oneCard.ok) throw new Error("setup failed");
+
+    expect(resolvePendingTrick(oneCard.value)).toBe(oneCard.value);
   });
 });

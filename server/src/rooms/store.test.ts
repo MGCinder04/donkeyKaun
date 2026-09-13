@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
   createRoom,
+  addBot,
+  botTakeover,
   findRoom,
   joinRoom,
   kickPlayer,
   leaveRoom,
   markSocketDisconnected,
+  normalizeRestoredGameState,
   removePlayerFromRoom,
+  removeBot,
   setReplacementSeat,
   startRoom,
   sweepStaleRooms,
 } from "./store.js";
+import { startGame } from "../game/engine.js";
+import { toPublicGameState } from "../game/publicState.js";
 
 const avatar = { catalogId: "cat", colorKey: "gold", kind: "animal" as const, preview: "x" };
 
@@ -242,5 +248,88 @@ describe("startRoom connected-player safety", () => {
       "start-host",
       "start-online",
     ]);
+  });
+});
+
+describe("server-owned bot seats", () => {
+  it("lets one human add a bot and start a solo challenge", () => {
+    const created = createRoom("Solo", avatar, "bot-host", "bot-socket");
+    if (!created.ok) throw new Error("setup failed");
+    expect(addBot(created.value.code, "bot-host", "ustaad").ok).toBe(true);
+    expect(startRoom(created.value.code, "bot-host").ok).toBe(true);
+    const room = findRoom(created.value.code)!;
+    expect(room.players).toHaveLength(2);
+    expect(room.players[1].botKind).toBe("ustaad");
+    expect(room.game?.seatOrder).toContain(room.players[1].deviceId);
+  });
+
+  it("lets only the host add and remove bots", () => {
+    const created = createRoom("Host", avatar, "bot-auth-host", "bot-auth-socket");
+    if (!created.ok) throw new Error("setup failed");
+    joinRoom(created.value.code, "Guest", avatar, "bot-auth-guest", "bot-auth-guest-socket");
+    expect(addBot(created.value.code, "bot-auth-guest", "bhola")).toEqual({ ok: false, error: "not_host" });
+    const added = addBot(created.value.code, "bot-auth-host", "bhola");
+    expect(added.ok).toBe(true);
+    const botId = findRoom(created.value.code)!.players.find((player) => player.botKind)!.deviceId;
+    expect(removeBot(created.value.code, "bot-auth-guest", botId)).toEqual({ ok: false, error: "not_host" });
+    expect(removeBot(created.value.code, "bot-auth-host", botId).ok).toBe(true);
+  });
+
+  it("transfers a disconnected seat's complete game state to a bot", () => {
+    const created = createRoom("Host", avatar, "take-host", "take-host-socket");
+    if (!created.ok) throw new Error("setup failed");
+    joinRoom(created.value.code, "Guest", avatar, "take-guest", "take-guest-socket");
+    startRoom(created.value.code, "take-host");
+    const before = findRoom(created.value.code)!;
+    before.game!.scores["take-guest"] = 86;
+    const inheritedHand = before.game!.hands["take-guest"];
+    markSocketDisconnected("take-guest-socket");
+
+    const result = botTakeover(created.value.code, "take-host", "take-guest", "hisaabi");
+    expect(result.ok).toBe(true);
+    const after = findRoom(created.value.code)!;
+    const bot = after.players.find((player) => player.botKind === "hisaabi")!;
+    expect(after.game!.scores[bot.deviceId]).toBe(86);
+    expect(after.game!.hands[bot.deviceId]).toEqual(inheritedHand);
+    expect(after.game!.seatOrder).not.toContain("take-guest");
+  });
+});
+
+describe("restored card knowledge", () => {
+  it("repairs legacy history and derives void suits from public plays", () => {
+    const game = startGame(["legacy-a", "legacy-b"], () => 0.5);
+    game.phase = "trick";
+    game.tricksWon = { "legacy-a": 1, "legacy-b": 0 };
+    game.currentTrick = [
+      { deviceId: "legacy-a", card: { suit: "H", rank: "A" } },
+      { deviceId: "legacy-b", card: { suit: "S", rank: "2" } },
+    ];
+    (game as unknown as { playHistory: unknown }).playHistory = {
+      complete: "not-a-boolean",
+      plays: [
+        { handNumber: 1, deviceId: "legacy-a", card: { suit: "D", rank: "A" }, leadSuit: "D" },
+        { handNumber: 1, deviceId: "legacy-b", card: { suit: "C", rank: "2" }, leadSuit: "D" },
+        { handNumber: 1, deviceId: "legacy-b", card: { suit: "C", rank: "2" }, leadSuit: "D" },
+        { nonsense: true },
+      ],
+    };
+    game.voidSuits = { "legacy-a": ["S"], "legacy-b": [] };
+
+    normalizeRestoredGameState(game);
+
+    expect(game.playHistory.complete).toBe(false);
+    expect(game.playHistory.plays).toHaveLength(4);
+    expect(game.playHistory.plays.slice(-2).map((play) => play.handNumber)).toEqual([2, 2]);
+    expect(game.voidSuits["legacy-a"]).toEqual([]);
+    expect(game.voidSuits["legacy-b"]).toEqual(["D", "H"]);
+  });
+
+  it("keeps private inference history out of public game state", () => {
+    const game = startGame(["public-a", "public-b"], () => 0.25);
+    const publicGame = toPublicGameState(game) as unknown as Record<string, unknown>;
+
+    expect(publicGame.playHistory).toBeUndefined();
+    expect(publicGame.voidSuits).toBeUndefined();
+    expect(publicGame.hands).toBeUndefined();
   });
 });

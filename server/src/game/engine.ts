@@ -1,10 +1,22 @@
-import { type Card, type Suit, TRUMP_ROTATION, cardId, createDeck, rankValue, shuffle } from "./cards.js";
+import { type Card, type Suit, TRUMP_ROTATION, cardId, createDeck, rankValue, shuffle, sortCards } from "./cards.js";
 
 export type GamePhase = "bidding" | "trick" | "game-end";
 
 export interface TrickCard {
   deviceId: string;
   card: Card;
+}
+
+export interface PlayedCardEvent extends TrickCard {
+  handNumber: number;
+  leadSuit: Suit;
+}
+
+export interface RoundPlayHistory {
+  /** False only for a legacy room restored halfway through a round, where cards
+   * played before the deployment were never recorded. */
+  complete: boolean;
+  plays: PlayedCardEvent[];
 }
 
 export interface RoundSummary {
@@ -26,6 +38,10 @@ export interface GameState {
   bidTurnIndex: number;
   tricksWon: Record<string, number>;
   currentTrick: TrickCard[];
+  /** Every publicly played card in this round, recorded at play time. */
+  playHistory: RoundPlayHistory;
+  /** Suits each player has publicly failed to follow this round. */
+  voidSuits: Record<string, Suit[]>;
   turnSeat: number; // seat index whose turn it is to play (trick phase)
   scores: Record<string, number>;
   lastRoundSummary: RoundSummary | null;
@@ -49,7 +65,7 @@ function dealRound(seatOrder: string[], round: number, dealerSeat: number, rng: 
   const order = orderFrom(seatOrder, dealerSeat + 1);
   const hands: GameState["hands"] = {};
   order.forEach((deviceId, i) => {
-    hands[deviceId] = deck.slice(i * cardsThisRound, (i + 1) * cardsThisRound);
+    hands[deviceId] = sortCards(deck.slice(i * cardsThisRound, (i + 1) * cardsThisRound));
   });
   return hands;
 }
@@ -74,9 +90,11 @@ function buildRound(
   const bidOrder = orderFrom(seatOrder, dealerSeat + 1);
   const bids: Record<string, number | null> = {};
   const tricksWon: Record<string, number> = {};
+  const voidSuits: Record<string, Suit[]> = {};
   for (const deviceId of seatOrder) {
     bids[deviceId] = null;
     tricksWon[deviceId] = 0;
+    voidSuits[deviceId] = [];
   }
   return {
     round,
@@ -91,6 +109,8 @@ function buildRound(
     bidTurnIndex: 0,
     tricksWon,
     currentTrick: [],
+    playHistory: { complete: true, plays: [] },
+    voidSuits,
     turnSeat: seatOrder.indexOf(bidOrder[0]),
     scores,
     lastRoundSummary: null,
@@ -197,10 +217,32 @@ export function playCard(state: GameState, deviceId: string, card: Card, rng: ()
 
   const hands = { ...state.hands, [deviceId]: hand.filter((_, i) => i !== handIndex) };
   const currentTrick = [...state.currentTrick, { deviceId, card }];
+  const leadSuit = state.currentTrick[0]?.card.suit;
+  const resolvedLeadSuit = leadSuit ?? card.suit;
+  // The public ledger is the durable source of hand numbering. `tricksWon` can lose
+  // an entry when the host removes a departed player, so summing it can make a later
+  // hand reuse an earlier number. Reuse the current pile's number while a hand is in
+  // progress; otherwise advance past the greatest number ever recorded.
+  const priorPlays = state.playHistory?.plays ?? [];
+  const handNumber = state.currentTrick.length > 0
+    ? (priorPlays.at(-1)?.handNumber ?? 1)
+    : Math.max(0, ...priorPlays.map((play) => play.handNumber)) + 1;
+  const playHistory: RoundPlayHistory = {
+    complete: state.playHistory?.complete ?? false,
+    plays: [
+      ...priorPlays,
+      { handNumber, deviceId, card: { ...card }, leadSuit: resolvedLeadSuit },
+    ],
+  };
+  const voidSuits = { ...(state.voidSuits ?? {}) };
+  if (leadSuit && card.suit !== leadSuit) {
+    const known = voidSuits[deviceId] ?? [];
+    if (!known.includes(leadSuit)) voidSuits[deviceId] = [...known, leadSuit];
+  }
 
   if (currentTrick.length < state.seatOrder.length) {
     const turnSeat = (state.turnSeat + 1) % state.seatOrder.length;
-    return { ok: true, value: { ...state, hands, currentTrick, turnSeat } };
+    return { ok: true, value: { ...state, hands, currentTrick, playHistory, voidSuits, turnSeat } };
   }
 
   // The trick is complete but deliberately left unresolved here — turnSeat -1 means
@@ -209,7 +251,7 @@ export function playCard(state: GameState, deviceId: string, card: Card, rng: ()
   // visible to animate, then calls resolvePendingTrick after a short pause. Resolving
   // synchronously in this same call would mean the server only ever broadcasts "trick
   // cleared, score updated" and clients would have nothing to animate the sweep from.
-  return { ok: true, value: { ...state, hands, currentTrick, turnSeat: -1 } };
+  return { ok: true, value: { ...state, hands, currentTrick, playHistory, voidSuits, turnSeat: -1 } };
 }
 
 export function isTrickComplete(state: GameState): boolean {
@@ -217,13 +259,19 @@ export function isTrickComplete(state: GameState): boolean {
 }
 
 export function resolvePendingTrick(state: GameState, rng: () => number = Math.random): GameState {
+  if (!isTrickComplete(state)) return state;
   const leadSuit = state.currentTrick[0].card.suit;
   const winnerId = resolveTrick(state.currentTrick, leadSuit, state.trumpSuit);
   const tricksWon = { ...state.tricksWon, [winnerId]: (state.tricksWon[winnerId] ?? 0) + 1 };
   const winnerSeat = state.seatOrder.indexOf(winnerId);
 
   const roundOver = Object.values(state.hands).every((h) => h.length === 0);
-  const afterTrick: GameState = { ...state, currentTrick: [], tricksWon, turnSeat: winnerSeat };
+  const afterTrick: GameState = {
+    ...state,
+    currentTrick: [],
+    tricksWon,
+    turnSeat: winnerSeat,
+  };
 
   if (!roundOver) return afterTrick;
   return finishRound(afterTrick, rng);
@@ -284,6 +332,13 @@ export function replacePlayer(state: GameState, from: string, to: string): GameS
     currentTrick: state.currentTrick.map((play) =>
       play.deviceId === from ? { ...play, deviceId: to } : play,
     ),
+    playHistory: {
+      complete: state.playHistory?.complete ?? false,
+      plays: (state.playHistory?.plays ?? []).map((play) =>
+        play.deviceId === from ? { ...play, deviceId: to } : play,
+      ),
+    },
+    voidSuits: renameRecordKey(state.voidSuits ?? {}, from, to),
     scores: renameRecordKey(state.scores, from, to),
     lastRoundSummary: renameSummary(state.lastRoundSummary, from, to),
     roundHistory: state.roundHistory.map((summary) => renameSummary(summary, from, to)!),
@@ -353,6 +408,7 @@ export function removePlayer(state: GameState, deviceId: string): GameState {
     bidOrder,
     bidTurnIndex,
     tricksWon: removeRecordKey(state.tricksWon, deviceId),
+    voidSuits: removeRecordKey(state.voidSuits ?? {}, deviceId),
     currentTrick,
     turnSeat,
     dealerSeat,

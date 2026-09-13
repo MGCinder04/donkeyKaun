@@ -1,9 +1,13 @@
 import type { Server, Socket } from "socket.io";
 import { hashResumeToken, authorizeResume, isValidResumeToken } from "./membershipTokens.js";
-import type { Card } from "../game/cards.js";
+import { cardId, type Card } from "../game/cards.js";
+import { chooseBid, chooseCard, viewForBot } from "../bots/strategy.js";
+import { BOT_PROFILES, isBotKind } from "../bots/types.js";
 import { privateHandFor } from "../game/publicState.js";
 import {
   bidInRoom,
+  addBot,
+  botTakeover,
   continueGameInRoom,
   createRoom,
   exitGameInRoom,
@@ -15,6 +19,7 @@ import {
   newGameInRoom,
   playCardInRoom,
   removePlayerFromRoom,
+  removeBot,
   resolvePendingTrickInRoom,
   restoreRoom,
   setReplacementSeat,
@@ -52,6 +57,7 @@ interface RoomPayload {
   bid?: unknown;
   card?: unknown;
   data?: unknown;
+  botKind?: unknown;
   resumeToken?: unknown;
   nextResumeToken?: unknown;
 }
@@ -116,6 +122,21 @@ async function releaseLobbyMembership(io: Server, socket: Socket): Promise<boole
 // pile cleared, score updated). Without this pause the client never receives a snapshot
 // with the full pile in it, so there's nothing to animate the sweep-to-winner from.
 const TRICK_RESOLVE_DELAY_MS = 250;
+const botTimers = new Map<string, ReturnType<typeof setTimeout>>();
+interface PendingTrickTimer {
+  timer: ReturnType<typeof setTimeout>;
+  fingerprint: string;
+}
+
+const trickTimers = new Map<string, PendingTrickTimer>();
+
+function trickFingerprint(room: Room): string | null {
+  if (!room.game || !trickPendingResolution(room)) return null;
+  return [
+    room.game.round,
+    ...room.game.currentTrick.map((play) => `${play.deviceId}:${cardId(play.card)}`),
+  ].join("|");
+}
 
 function isCard(value: unknown): value is Card {
   if (typeof value !== "object" || value === null) return false;
@@ -154,14 +175,85 @@ function broadcastRoom(io: Server, code: string): void {
   }
 }
 
+function currentBot(room: Room) {
+  if (!room.game || room.game.phase === "game-end" || trickPendingResolution(room)) return null;
+  const id = room.game.phase === "bidding"
+    ? room.game.bidOrder[room.game.bidTurnIndex]
+    : room.game.seatOrder[room.game.turnSeat];
+  return room.players.find((player) => player.deviceId === id && player.botKind) ?? null;
+}
+
+function scheduleBotTurn(io: Server, code: string): void {
+  const normalized = code.toUpperCase();
+  const existingTimer = botTimers.get(normalized);
+  if (existingTimer) clearTimeout(existingTimer);
+  botTimers.delete(normalized);
+
+  const room = findRoom(normalized);
+  // Bots pause if every human is offline, so an abandoned room cannot play itself.
+  if (!room || !room.players.some((player) => !player.botKind && player.socketId !== null)) return;
+  const bot = currentBot(room);
+  if (!bot?.botKind || !room.game) return;
+  const botKind = bot.botKind;
+  const fingerprint = `${room.game.round}:${room.game.phase}:${room.game.bidTurnIndex}:${room.game.turnSeat}:${room.game.currentTrick.length}:${room.game.hands[bot.deviceId]?.length ?? -1}`;
+  const timer = setTimeout(() => {
+    botTimers.delete(normalized);
+    const latest = findRoom(normalized);
+    const latestBot = latest ? currentBot(latest) : null;
+    if (
+      !latest?.game ||
+      !latest.players.some((player) => !player.botKind && player.socketId !== null) ||
+      latestBot?.deviceId !== bot.deviceId ||
+      latestBot.botKind !== botKind
+    ) return;
+    const latestFingerprint = `${latest.game.round}:${latest.game.phase}:${latest.game.bidTurnIndex}:${latest.game.turnSeat}:${latest.game.currentTrick.length}:${latest.game.hands[bot.deviceId]?.length ?? -1}`;
+    if (latestFingerprint !== fingerprint) return;
+
+    const view = viewForBot(latest.game, bot.deviceId, botKind);
+    const result = latest.game.phase === "bidding"
+      ? bidInRoom(normalized, bot.deviceId, chooseBid(view))
+      : playCardInRoom(normalized, bot.deviceId, chooseCard(view));
+    if (!result.ok) {
+      console.warn(`[bots] ${bot.name} could not act in ${normalized}: ${result.error}`);
+      return;
+    }
+    broadcastRoom(io, normalized);
+    void persistRoom(result.value);
+    scheduleRoomProgress(io, normalized);
+  }, BOT_PROFILES[botKind].delayMs);
+  botTimers.set(normalized, timer);
+}
+
 function scheduleTrickResolution(io: Server, code: string): void {
-  setTimeout(() => {
-    const resolved = resolvePendingTrickInRoom(code);
+  const normalized = code.toUpperCase();
+  const room = findRoom(normalized);
+  if (!room) return;
+  const fingerprint = trickFingerprint(room);
+  if (!fingerprint) return;
+  const existing = trickTimers.get(normalized);
+  if (existing?.fingerprint === fingerprint) return;
+  if (existing) clearTimeout(existing.timer);
+  const timer = setTimeout(() => {
+    trickTimers.delete(normalized);
+    const latest = findRoom(normalized);
+    if (!latest || trickFingerprint(latest) !== fingerprint) {
+      scheduleRoomProgress(io, normalized);
+      return;
+    }
+    const resolved = resolvePendingTrickInRoom(normalized);
     if (resolved.ok) {
-      broadcastRoom(io, code);
+      broadcastRoom(io, normalized);
       void persistRoom(resolved.value);
+      scheduleRoomProgress(io, normalized);
     }
   }, TRICK_RESOLVE_DELAY_MS);
+  trickTimers.set(normalized, { timer, fingerprint });
+}
+
+function scheduleRoomProgress(io: Server, code: string): void {
+  const room = findRoom(code);
+  if (room && trickPendingResolution(room)) scheduleTrickResolution(io, code);
+  else scheduleBotTurn(io, code);
 }
 
 export function registerRoomHandlers(io: Server, socket: Socket): void {
@@ -191,6 +283,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     ack({ ok: true, value: { code: result.value.code } });
     socket.emit("room:membership-ready", { code: result.value.code });
     broadcastRoom(io, result.value.code);
+    scheduleRoomProgress(io, result.value.code);
   });
 
   socket.on("room:join", async (payload: RoomPayload, ack: Ack<{ room: PublicRoom }> = noop) => {
@@ -265,6 +358,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       }
     }
     broadcastRoom(io, result.value.code);
+    scheduleRoomProgress(io, result.value.code);
   });
 
   socket.on("room:update-profile", async (payload: RoomPayload, ack: Ack<null> = noop) => {
@@ -303,6 +397,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     void persistRoom(result.value);
     ack({ ok: true, value: null });
     broadcastRoom(io, payload.code);
+    scheduleRoomProgress(io, payload.code);
   });
 
   socket.on("room:kick", async (payload: RoomPayload, ack: Ack<null> = noop) => {
@@ -337,6 +432,73 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     void persistOrDelete(payload.code, findRoom(payload.code));
     ack({ ok: true, value: null });
     broadcastRoom(io, payload.code);
+    scheduleRoomProgress(io, payload.code);
+  });
+
+  socket.on("room:add-bot", async (payload: RoomPayload, ack: Ack<null> = noop) => {
+    if (typeof payload?.code !== "string" || typeof payload.deviceId !== "string" || !isBotKind(payload.botKind)) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    const result = addBot(payload.code, payload.deviceId, payload.botKind);
+    if (!result.ok) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+    void persistRoom(result.value);
+    ack({ ok: true, value: null });
+    broadcastRoom(io, payload.code);
+    scheduleRoomProgress(io, payload.code);
+  });
+
+  socket.on("room:remove-bot", async (payload: RoomPayload, ack: Ack<null> = noop) => {
+    if (typeof payload?.code !== "string" || typeof payload.deviceId !== "string" || typeof payload.targetDeviceId !== "string") {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    const result = removeBot(payload.code, payload.deviceId, payload.targetDeviceId);
+    if (!result.ok) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+    void persistRoom(result.value);
+    ack({ ok: true, value: null });
+    broadcastRoom(io, payload.code);
+    scheduleRoomProgress(io, payload.code);
+  });
+
+  socket.on("room:bot-takeover", async (payload: RoomPayload, ack: Ack<null> = noop) => {
+    if (
+      typeof payload?.code !== "string" ||
+      typeof payload.deviceId !== "string" ||
+      typeof payload.targetDeviceId !== "string" ||
+      !isBotKind(payload.botKind)
+    ) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    const result = botTakeover(payload.code, payload.deviceId, payload.targetDeviceId, payload.botKind);
+    if (!result.ok) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+    await clearTurnMembership(membershipKey(payload.code, payload.targetDeviceId));
+    void persistRoom(result.value);
+    ack({ ok: true, value: null });
+    broadcastRoom(io, payload.code);
+    scheduleRoomProgress(io, payload.code);
   });
 
   socket.on("room:replacement", async (payload: RoomPayload, ack: Ack<null> = noop) => {
@@ -360,6 +522,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     void persistRoom(result.value);
     ack({ ok: true, value: null });
     broadcastRoom(io, payload.code);
+    scheduleRoomProgress(io, payload.code);
   });
 
   socket.on("room:remove-seat", async (payload: RoomPayload, ack: Ack<null> = noop) => {
@@ -384,7 +547,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     void persistRoom(result.value);
     ack({ ok: true, value: null });
     broadcastRoom(io, payload.code);
-    if (trickPendingResolution(result.value)) scheduleTrickResolution(io, payload.code);
+    scheduleRoomProgress(io, payload.code);
   });
 
   socket.on("room:leave", async (payload: RoomPayload) => {
@@ -395,6 +558,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     const updated = leaveRoom(payload.code, payload.deviceId);
     unbindSocket(socket);
     broadcastRoom(io, payload.code);
+    scheduleRoomProgress(io, payload.code);
     void persistOrDelete(payload.code, updated);
   });
 
@@ -415,6 +579,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     void persistRoom(result.value);
     ack({ ok: true, value: null });
     broadcastRoom(io, payload.code);
+    scheduleRoomProgress(io, payload.code);
   });
 
   socket.on("game:play", async (payload: RoomPayload, ack: Ack<null> = noop) => {
@@ -437,7 +602,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
 
     if (trickPendingResolution(result.value)) {
       scheduleTrickResolution(io, payload.code);
-    }
+    } else scheduleRoomProgress(io, payload.code);
   });
 
   socket.on("game:new", async (payload: RoomPayload, ack: Ack<null> = noop) => {
@@ -457,6 +622,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     void persistRoom(result.value);
     ack({ ok: true, value: null });
     broadcastRoom(io, payload.code);
+    scheduleRoomProgress(io, payload.code);
   });
 
   socket.on("game:continue", async (payload: RoomPayload, ack: Ack<null> = noop) => {
@@ -476,6 +642,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     void persistRoom(result.value);
     ack({ ok: true, value: null });
     broadcastRoom(io, payload.code);
+    scheduleRoomProgress(io, payload.code);
   });
 
   socket.on("game:exit", async (payload: RoomPayload, ack: Ack<null> = noop) => {

@@ -12,12 +12,21 @@ export const RANKS: Rank[] = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J",
 // Trump rotates through this order, one step per round, cycling twice over 8 rounds.
 export const TRUMP_ROTATION: Suit[] = ["S", "H", "C", "D"];
 
+const SUIT_ORDER: Record<Suit, number> = { S: 0, H: 1, C: 2, D: 3 };
+
 export function rankValue(rank: Rank): number {
   return RANKS.indexOf(rank);
 }
 
 export function cardId(card: Card): string {
   return `${card.suit}${card.rank}`;
+}
+
+/** Spades, hearts, clubs, diamonds; strongest card first within each suit. */
+export function sortCards(cards: Card[]): Card[] {
+  return [...cards].sort(
+    (a, b) => SUIT_ORDER[a.suit] - SUIT_ORDER[b.suit] || rankValue(b.rank) - rankValue(a.rank),
+  );
 }
 
 export function createDeck(): Card[] {

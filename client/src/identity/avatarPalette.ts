@@ -8,15 +8,28 @@ export const DICEBEAR_STYLE_KEYS = [
   "openPeeps",
   "personas",
   "thumbs",
-];
+] as const;
 
-const MALE_SEEDS = [
+const ORIGINAL_MALE_SEEDS = [
   "Dev", "Aarav", "Rohan", "Karan", "Vikram", "Sameer", "Ishaan", "Nikhil", "Arjun", "Rahul",
 ];
 
-const FEMALE_SEEDS = [
+const ORIGINAL_FEMALE_SEEDS = [
   "Amara", "Zoya", "Leela", "Priya", "Anaya", "Kavya", "Meera", "Sana", "Riya", "Naina",
 ];
+
+const ALL_SEEDS = [...ORIGINAL_MALE_SEEDS, ...ORIGINAL_FEMALE_SEEDS];
+
+type DicebearStyleKey = (typeof DICEBEAR_STYLE_KEYS)[number];
+
+// Five visually distinct styles × twenty seeds = one hundred visible people.
+const VISIBLE_PEOPLE_STYLE_KEYS = [
+  "adventurer",
+  "avataaars",
+  "bigSmile",
+  "openPeeps",
+  "personas",
+] as const satisfies readonly DicebearStyleKey[];
 
 const ANIMAL_EMOJI = [
   "🦊", "🐼", "🦁", "🐨", "🐯", "🦉", "🐻", "🐺", "🐸", "🐵",
@@ -31,7 +44,7 @@ const MISC_EMOJI = [
   "🎩", "🕶️", "🎭", "🔥",
 ];
 
-export type AvatarCategory = "male" | "female" | "animal" | "misc";
+export type AvatarCategory = "people" | "animal" | "misc";
 
 export interface CatalogEntry {
   id: string;
@@ -42,24 +55,27 @@ export interface CatalogEntry {
   emoji?: string;
 }
 
-export const MALE_CATALOG: CatalogEntry[] = DICEBEAR_STYLE_KEYS.flatMap((styleKey) =>
-  MALE_SEEDS.map((seed) => ({
-    id: `${styleKey}-m-${seed}`,
+function legacyCatalogId(styleKey: DicebearStyleKey, seed: string): string {
+  // Preserve IDs so already-saved avatars continue to resolve after recategorizing.
+  return `${styleKey}-${ORIGINAL_MALE_SEEDS.includes(seed) ? "m" : "f"}-${seed}`;
+}
+
+const ALL_DICEBEAR_CATALOG: CatalogEntry[] = DICEBEAR_STYLE_KEYS.flatMap((styleKey) =>
+  ALL_SEEDS.map((seed) => ({
+    id: legacyCatalogId(styleKey, seed),
     kind: "dicebear" as const,
-    category: "male" as const,
+    category: "people" as const,
     styleKey,
     seed,
   })),
 );
 
-export const FEMALE_CATALOG: CatalogEntry[] = DICEBEAR_STYLE_KEYS.flatMap((styleKey) =>
-  FEMALE_SEEDS.map((seed) => ({
-    id: `${styleKey}-f-${seed}`,
-    kind: "dicebear" as const,
-    category: "female" as const,
-    styleKey,
-    seed,
-  })),
+const visiblePeopleStyles = new Set<DicebearStyleKey>(VISIBLE_PEOPLE_STYLE_KEYS);
+const DICEBEAR_CATALOG = ALL_DICEBEAR_CATALOG.filter(
+  (entry) => entry.styleKey && visiblePeopleStyles.has(entry.styleKey as DicebearStyleKey),
+);
+const LEGACY_DICEBEAR_CATALOG = ALL_DICEBEAR_CATALOG.filter(
+  (entry) => !entry.styleKey || !visiblePeopleStyles.has(entry.styleKey as DicebearStyleKey),
 );
 
 export const ANIMAL_CATALOG: CatalogEntry[] = ANIMAL_EMOJI.map((emoji, i) => ({
@@ -72,13 +88,12 @@ export const ANIMAL_CATALOG: CatalogEntry[] = ANIMAL_EMOJI.map((emoji, i) => ({
 export const MISC_CATALOG: CatalogEntry[] = MISC_EMOJI.map((emoji, i) => ({
   id: `misc-${i}`,
   kind: "animal" as const,
-  category: "misc" as const,
+  category: emoji === "🐉" || emoji === "🦄" ? "animal" as const : "misc" as const,
   emoji,
 }));
 
 export const AVATAR_CATALOG: CatalogEntry[] = [
-  ...MALE_CATALOG,
-  ...FEMALE_CATALOG,
+  ...DICEBEAR_CATALOG,
   ...ANIMAL_CATALOG,
   ...MISC_CATALOG,
 ];
@@ -98,7 +113,8 @@ export const COLOR_PALETTE: ColorOption[] = [
 ];
 
 export function findCatalogEntry(id: string): CatalogEntry | undefined {
-  return AVATAR_CATALOG.find((entry) => entry.id === id);
+  return AVATAR_CATALOG.find((entry) => entry.id === id)
+    ?? LEGACY_DICEBEAR_CATALOG.find((entry) => entry.id === id);
 }
 
 export function colorHex(colorKey: string): string {
