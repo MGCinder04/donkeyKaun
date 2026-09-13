@@ -20,9 +20,17 @@ import {
   updateProfile,
 } from "./store.js";
 import type { PublicRoom, RoomErrorCode } from "./types.js";
+import {
+  clearTurnMembership,
+  getIceServerConfiguration,
+  type IceServerConfiguration,
+} from "../voice/iceServers.js";
 
 type Envelope<T> = { ok: true; value: T } | { ok: false; error: RoomErrorCode };
 type Ack<T> = (response: Envelope<T>) => void;
+type VoiceIceAck = (
+  response: { ok: true; value: IceServerConfiguration } | { ok: false; error: "unauthorized" },
+) => void;
 
 interface RoomPayload {
   code?: unknown;
@@ -36,6 +44,45 @@ interface RoomPayload {
 }
 
 function noop() {}
+
+function membershipKey(code: string, deviceId: string): string {
+  return `${code.toUpperCase()}:${deviceId}`;
+}
+
+function bindSocket(socket: Socket, code: string, deviceId: string): void {
+  socket.data.roomCode = code.toUpperCase();
+  socket.data.deviceId = deviceId;
+}
+
+function unbindSocket(socket: Socket): void {
+  delete socket.data.roomCode;
+  delete socket.data.deviceId;
+}
+
+function socketOwnsMembership(socket: Socket, code: string, deviceId: string): boolean {
+  if (socket.data.roomCode !== code.toUpperCase() || socket.data.deviceId !== deviceId) return false;
+  const room = findRoom(code);
+  return room?.players.some((player) => player.deviceId === deviceId && player.socketId === socket.id) ?? false;
+}
+
+/** Let a socket move away from an abandoned lobby without weakening in-game
+ * reconnect protection. A playing room must still be exited explicitly. */
+function releaseLobbyMembership(io: Server, socket: Socket): boolean {
+  const code = socket.data.roomCode;
+  const deviceId = socket.data.deviceId;
+  if (typeof code !== "string" || typeof deviceId !== "string") {
+    unbindSocket(socket);
+    return true;
+  }
+  const room = findRoom(code);
+  if (room?.status === "playing") return false;
+  socket.leave(code);
+  void clearTurnMembership(membershipKey(code, deviceId));
+  leaveRoom(code, deviceId);
+  unbindSocket(socket);
+  if (room) broadcastRoom(io, code);
+  return true;
+}
 
 // How long a completed trick sits fully visible before it resolves (winner computed,
 // pile cleared, score updated). Without this pause the client never receives a snapshot
@@ -81,7 +128,7 @@ function broadcastRoom(io: Server, code: string): void {
 
 export function registerRoomHandlers(io: Server, socket: Socket): void {
   socket.on("room:create", (payload: RoomPayload, ack: Ack<{ code: string }> = noop) => {
-    if (typeof payload?.deviceId !== "string") {
+    if (typeof payload?.deviceId !== "string" || !releaseLobbyMembership(io, socket)) {
       ack({ ok: false, error: "invalid" });
       return;
     }
@@ -90,6 +137,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       ack({ ok: false, error: result.error });
       return;
     }
+    bindSocket(socket, result.value.code, payload.deviceId);
     socket.join(result.value.code);
     ack({ ok: true, value: { code: result.value.code } });
     broadcastRoom(io, result.value.code);
@@ -100,11 +148,30 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       ack({ ok: false, error: "invalid" });
       return;
     }
+    const requestedCode = payload.code.toUpperCase();
+    if (
+      socket.data.roomCode === requestedCode &&
+      typeof socket.data.deviceId === "string" &&
+      socket.data.deviceId !== payload.deviceId
+    ) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    if (socket.data.roomCode && socket.data.roomCode !== requestedCode && !releaseLobbyMembership(io, socket)) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    const existing = findRoom(requestedCode)?.players.find((player) => player.deviceId === payload.deviceId);
+    if (existing?.socketId && existing.socketId !== socket.id) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
     const result = joinRoom(payload.code, payload.name, payload.avatar, payload.deviceId, socket.id);
     if (!result.ok) {
       ack({ ok: false, error: result.error });
       return;
     }
+    bindSocket(socket, result.value.code, payload.deviceId);
     socket.join(result.value.code);
     ack({ ok: true, value: toPublicRoom(result.value) });
     broadcastRoom(io, result.value.code);
@@ -112,6 +179,10 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
 
   socket.on("room:update-profile", (payload: RoomPayload, ack: Ack<null> = noop) => {
     if (typeof payload?.code !== "string" || typeof payload?.deviceId !== "string") {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) {
       ack({ ok: false, error: "invalid" });
       return;
     }
@@ -126,6 +197,10 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
 
   socket.on("room:start", (payload: RoomPayload, ack: Ack<null> = noop) => {
     if (typeof payload?.code !== "string" || typeof payload?.deviceId !== "string") {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) {
       ack({ ok: false, error: "invalid" });
       return;
     }
@@ -147,6 +222,10 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       ack({ ok: false, error: "invalid" });
       return;
     }
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
     const result = kickPlayer(payload.code, payload.deviceId, payload.targetDeviceId);
     if (!result.ok) {
       ack({ ok: false, error: result.error });
@@ -154,22 +233,34 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     }
     ack({ ok: true, value: null });
     const { removedSocketId } = result.value;
+    void clearTurnMembership(membershipKey(payload.code, payload.targetDeviceId));
     if (removedSocketId) {
       io.to(removedSocketId).emit("room:kicked", { code: payload.code });
-      io.sockets.sockets.get(removedSocketId)?.leave(payload.code);
+      const removedSocket = io.sockets.sockets.get(removedSocketId);
+      if (removedSocket) {
+        removedSocket.leave(payload.code);
+        unbindSocket(removedSocket);
+      }
     }
     broadcastRoom(io, payload.code);
   });
 
   socket.on("room:leave", (payload: RoomPayload) => {
     if (typeof payload?.code !== "string" || typeof payload?.deviceId !== "string") return;
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) return;
     socket.leave(payload.code);
+    void clearTurnMembership(membershipKey(payload.code, payload.deviceId));
     leaveRoom(payload.code, payload.deviceId);
+    unbindSocket(socket);
     broadcastRoom(io, payload.code);
   });
 
   socket.on("game:bid", (payload: RoomPayload, ack: Ack<null> = noop) => {
     if (typeof payload?.code !== "string" || typeof payload?.deviceId !== "string" || typeof payload?.bid !== "number") {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) {
       ack({ ok: false, error: "invalid" });
       return;
     }
@@ -184,6 +275,10 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
 
   socket.on("game:play", (payload: RoomPayload, ack: Ack<null> = noop) => {
     if (typeof payload?.code !== "string" || typeof payload?.deviceId !== "string" || !isCard(payload?.card)) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) {
       ack({ ok: false, error: "invalid" });
       return;
     }
@@ -209,6 +304,10 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       ack({ ok: false, error: "invalid" });
       return;
     }
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
     const result = newGameInRoom(payload.code, payload.deviceId);
     if (!result.ok) {
       ack({ ok: false, error: result.error });
@@ -220,6 +319,10 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
 
   socket.on("game:continue", (payload: RoomPayload, ack: Ack<null> = noop) => {
     if (typeof payload?.code !== "string" || typeof payload?.deviceId !== "string") {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) {
       ack({ ok: false, error: "invalid" });
       return;
     }
@@ -237,14 +340,48 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       ack({ ok: false, error: "invalid" });
       return;
     }
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) {
+      ack({ ok: false, error: "invalid" });
+      return;
+    }
     const code = payload.code;
+    const room = findRoom(code);
     const result = exitGameInRoom(code, payload.deviceId);
     if (!result.ok) {
       ack({ ok: false, error: result.error });
       return;
     }
+    for (const player of room?.players ?? []) {
+      void clearTurnMembership(membershipKey(code, player.deviceId));
+      if (player.socketId) {
+        const playerSocket = io.sockets.sockets.get(player.socketId);
+        if (playerSocket) unbindSocket(playerSocket);
+      }
+    }
     ack({ ok: true, value: null });
     io.to(code).emit("room:exited", { code });
+  });
+
+  socket.on("voice:ice", async (payload: RoomPayload, ack: VoiceIceAck = noop) => {
+    if (
+      typeof payload?.code !== "string" ||
+      typeof payload?.deviceId !== "string" ||
+      !socketOwnsMembership(socket, payload.code, payload.deviceId)
+    ) {
+      ack({ ok: false, error: "unauthorized" });
+      return;
+    }
+    const room = findRoom(payload.code);
+    const connectedPlayers = room?.players.filter((player) => player.socketId !== null).length ?? 0;
+    if (connectedPlayers < 2) {
+      ack({ ok: false, error: "unauthorized" });
+      return;
+    }
+    const config = await getIceServerConfiguration(
+      membershipKey(payload.code, payload.deviceId),
+      socket.handshake.address,
+    );
+    ack({ ok: true, value: config });
   });
 
   // WebRTC signaling relay for voice chat: purely a pass-through between two players
@@ -261,6 +398,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     }
     const room = findRoom(payload.code);
     if (!room) return;
+    if (!socketOwnsMembership(socket, payload.code, payload.deviceId)) return;
     const sender = room.players.find((p) => p.deviceId === payload.deviceId);
     const target = room.players.find((p) => p.deviceId === payload.targetDeviceId);
     if (!sender || sender.socketId !== socket.id || !target?.socketId) return;

@@ -208,6 +208,10 @@ latest, or just run it locally per the README.
 
 - Runtime secrets (site passcode, session secret, and optional TURN key) live only in
   Render's API-service environment. `.env` is gitignored and tracked examples stay empty.
+- Paid TURN is disabled by default behind an explicit kill switch. Credentials require
+  live authenticated room membership, expire after 30 minutes, and have issuance limits.
+- Production fails closed when the passcode, session secret, or HTTPS client origin is
+  missing or weak; the app does not silently deploy as a public service.
 - No accounts/passwords in scope for v1, which removes a whole class of risk.
 - Since the repo is public: before every merge to `main`, I'll re-check `git diff` for
   anything that looks like a key, token, or personal data before it goes up.

@@ -31,6 +31,12 @@ services:
         sync: false
       - key: CLOUDFLARE_TURN_KEY_API_TOKEN
         sync: false
+      - key: TURN_ENABLED
+        sync: false # leave unset/false until production security checks pass
+      - key: TURN_HOURLY_IP_LIMIT
+        value: "30"
+      - key: TURN_DAILY_CREDENTIAL_LIMIT
+        value: "120"
 
   - type: web
     name: donkey-kaun
@@ -41,6 +47,25 @@ services:
     envVars:
       - key: VITE_API_URL
         sync: false # set to the deployed API URL, e.g. https://donkey-kaun-api.onrender.com
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), geolocation=(), payment=(), microphone=(self)
+      - path: /*
+        name: Content-Security-Policy
+        value: default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://donkey-kaun-api.onrender.com wss://donkey-kaun-api.onrender.com; media-src 'self' blob:
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=31536000; includeSubDomains
     routes:
       - type: rewrite
         source: /*

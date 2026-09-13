@@ -145,3 +145,29 @@ describe("kickPlayer mid-game", () => {
     expect(rejoin).toEqual({ ok: false, error: "kicked" });
   });
 });
+
+describe("startRoom connected-player safety", () => {
+  it("does not count a disconnected lobby player toward the minimum", () => {
+    const created = createRoom("Host", avatar, "connected-host", "socket-host");
+    if (!created.ok) throw new Error("setup failed");
+    joinRoom(created.value.code, "Guest", avatar, "offline-guest", "socket-guest");
+    markSocketDisconnected("socket-guest");
+
+    expect(startRoom(created.value.code, "connected-host")).toEqual({ ok: false, error: "cant_start" });
+  });
+
+  it("drops abandoned lobby seats when enough connected players start", () => {
+    const created = createRoom("Host", avatar, "start-host", "start-socket-host");
+    if (!created.ok) throw new Error("setup failed");
+    joinRoom(created.value.code, "Online", avatar, "start-online", "start-socket-online");
+    joinRoom(created.value.code, "Offline", avatar, "start-offline", "start-socket-offline");
+    markSocketDisconnected("start-socket-offline");
+
+    const started = startRoom(created.value.code, "start-host");
+    expect(started.ok).toBe(true);
+    expect(findRoom(created.value.code)?.players.map((player) => player.deviceId)).toEqual([
+      "start-host",
+      "start-online",
+    ]);
+  });
+});

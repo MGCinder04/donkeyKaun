@@ -1,10 +1,10 @@
-import { getAuthToken } from "../lib/authToken";
-import { API_BASE } from "../lib/config";
 import { getSocket } from "../rooms/socket";
 
 const FALLBACK_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.cloudflare.com:3478" }];
 const DISCONNECTED_RESTART_MS = 4_000;
 const ICE_REQUEST_TIMEOUT_MS = 8_000;
+const TURN_REFRESH_MS = 24 * 60 * 1000;
+const TURN_REFRESH_RETRY_MS = 2 * 60 * 1000;
 
 type VoiceSignalPayload =
   | { type: "description"; description: RTCSessionDescriptionInit }
@@ -47,6 +47,7 @@ let listeningMuted = false;
 let signalHandler: ((payload: { deviceId: string; data: VoiceSignalPayload }) => void) | null = null;
 let socketConnectHandler: (() => void) | null = null;
 let socketDisconnectHandler: (() => void) | null = null;
+let turnRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 const earlySignals: Array<{ deviceId: string; data: VoiceSignalPayload }> = [];
 
 const desiredPeers = new Set<string>();
@@ -76,26 +77,64 @@ function attachAnalyser(stream: MediaStream): { analyser: AnalyserNode; dataArra
   }
 }
 
-async function loadIceServers(): Promise<void> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ICE_REQUEST_TIMEOUT_MS);
-  try {
-    const token = getAuthToken();
-    const response = await fetch(`${API_BASE}/api/voice/ice`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = (await response.json()) as { iceServers?: unknown; turnAvailable?: unknown };
-    if (!Array.isArray(data.iceServers) || data.iceServers.length === 0) throw new Error("No ICE servers");
-    iceServers = data.iceServers as RTCIceServer[];
-    turnAvailable = data.turnAvailable === true;
-  } catch {
-    iceServers = FALLBACK_ICE_SERVERS;
-    turnAvailable = false;
-  } finally {
-    clearTimeout(timer);
+interface IceConfigurationResponse {
+  iceServers: RTCIceServer[];
+  turnAvailable: boolean;
+}
+
+function requestIceServers(): Promise<IceConfigurationResponse> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: IceConfigurationResponse) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(
+      () => finish({ iceServers: FALLBACK_ICE_SERVERS, turnAvailable: false }),
+      ICE_REQUEST_TIMEOUT_MS,
+    );
+    getSocket().emit(
+      "voice:ice",
+      { code: roomCode, deviceId: myDeviceId },
+      (response: { ok: boolean; value?: Partial<IceConfigurationResponse> }) => {
+        const servers = response?.value?.iceServers;
+        if (!response?.ok || !Array.isArray(servers) || servers.length === 0) {
+          finish({ iceServers: FALLBACK_ICE_SERVERS, turnAvailable: false });
+          return;
+        }
+        finish({ iceServers: servers, turnAvailable: response.value?.turnAvailable === true });
+      },
+    );
+  });
+}
+
+function scheduleTurnRefresh(delay = TURN_REFRESH_MS): void {
+  if (turnRefreshTimer) clearTimeout(turnRefreshTimer);
+  turnRefreshTimer = setTimeout(() => void refreshIceServers(), delay);
+}
+
+async function refreshIceServers(): Promise<void> {
+  const previousTurnAvailable = turnAvailable;
+  const config = await requestIceServers();
+  if (previousTurnAvailable && !config.turnAvailable) {
+    scheduleTurnRefresh(TURN_REFRESH_RETRY_MS);
+    return;
   }
+  iceServers = config.iceServers;
+  turnAvailable = config.turnAvailable;
+  for (const [deviceId, entry] of peers) {
+    if (entry.connection.signalingState === "closed") continue;
+    try {
+      entry.connection.setConfiguration({ iceServers });
+      entry.connection.restartIce();
+    } catch {
+      disconnectPeer(deviceId);
+      void connectPeer(deviceId);
+    }
+  }
+  if (turnAvailable) scheduleTurnRefresh();
 }
 
 function shouldInitiate(targetDeviceId: string): boolean {
@@ -330,8 +369,11 @@ export async function initVoiceSession(code: string, deviceId: string): Promise<
   socket.on("connect", socketConnectHandler);
   socket.on("disconnect", socketDisconnectHandler);
 
-  await loadIceServers();
+  const config = await requestIceServers();
   if (generation !== sessionGeneration) return;
+  iceServers = config.iceServers;
+  turnAvailable = config.turnAvailable;
+  if (turnAvailable) scheduleTurnRefresh();
   sessionReady = true;
   reconcilePeers();
   for (const pending of earlySignals.splice(0)) {
@@ -348,6 +390,7 @@ export function setDesiredPeers(deviceIds: string[]): void {
     if (!desiredPeers.has(id)) mutedPeers.delete(id);
   }
   reconcilePeers();
+  if (sessionReady && desiredPeers.size > 0 && !turnAvailable) void refreshIceServers();
 }
 
 export async function startLocalMic(): Promise<void> {
@@ -428,6 +471,8 @@ export function teardownAll(): void {
   signalHandler = null;
   socketConnectHandler = null;
   socketDisconnectHandler = null;
+  if (turnRefreshTimer) clearTimeout(turnRefreshTimer);
+  turnRefreshTimer = null;
   closeAllPeers();
   desiredPeers.clear();
   mutedPeers.clear();

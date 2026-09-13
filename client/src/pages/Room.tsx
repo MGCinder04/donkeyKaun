@@ -180,7 +180,8 @@ export function Room() {
 
   const self = room.players.find((p) => p.deviceId === identity.deviceId);
   const isHost = self?.isHost ?? false;
-  const canStart = room.players.length >= MIN_TO_START && room.players.length <= SEAT_COUNT;
+  const connectedPlayerCount = room.players.filter((player) => player.connected).length;
+  const canStart = connectedPlayerCount >= MIN_TO_START && connectedPlayerCount <= SEAT_COUNT;
 
   return (
     <section className="mx-auto max-w-3xl px-6 pt-16 pb-16">
@@ -281,7 +282,7 @@ export function Room() {
       ) : isHost ? (
         <div className="text-center">
           <Button variant="primary" disabled={!canStart || starting} onClick={handleStart}>
-            {starting ? "Starting…" : `Start Game (${room.players.length})`}
+            {starting ? "Starting…" : `Start Game (${connectedPlayerCount})`}
           </Button>
           {!canStart && (
             <p className="mt-2 text-sm" style={{ color: "var(--ink-faint)" }}>

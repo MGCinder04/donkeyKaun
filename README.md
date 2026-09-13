@@ -43,15 +43,41 @@ Cloudflare Realtime TURN key and add these **only** to the Render API Web Servic
 ```text
 CLOUDFLARE_TURN_KEY_ID=<the TURN key ID/UID>
 CLOUDFLARE_TURN_KEY_API_TOKEN=<the permanent TURN key secret>
+TURN_ENABLED=false
+TURN_HOURLY_IP_LIMIT=30
+TURN_DAILY_CREDENTIAL_LIMIT=120
 ```
 
 In Cloudflare: open **Realtime** → **TURN**, create a TURN key (for example,
 `donkey-kaun-production`), then copy its ID and secret. In Render: open the
 `donkey-kaun-api` Web Service → **Environment**, add the two values above, save, and
 redeploy. Do not put either real value in `.env.example`, `render.yaml`, client-side
-environment variables, or GitHub.
+environment variables, or GitHub. Keep `TURN_ENABLED=false` until the production gate
+has been checked; changing it to `true` is the explicit paid-service switch.
 
-The API exchanges the permanent secret for short-lived browser credentials at
-`GET /api/voice/ice`. The endpoint follows the site's passcode gate, and the client
-automatically falls back to direct STUN-only audio if TURN is not configured or is
-temporarily unavailable.
+TURN credentials are available only through an authenticated Socket.IO connection that
+is currently bound to a player in a room with another connected player. Each room member
+gets a separate credential that expires after 30 minutes and refreshes while the room is
+open. A live credential is also revoked when its player leaves, is kicked, changes
+lobbies, or the game exits. Fresh credentials are capped per IP and globally per server
+process. The client falls back to free STUN-only audio whenever TURN is disabled,
+limited, or unavailable.
+
+Cloudflare's budget alerts are informational and do not stop spending. If a guaranteed
+zero bill is required, leave `TURN_ENABLED=false`; application safeguards cannot replace
+a provider-enforced hard billing cap.
+
+## Production security requirements
+
+Production deliberately fails to start unless `SITE_PASSCODE` is at least 12 characters,
+`SESSION_SECRET` is at least 32 characters, and `CLIENT_ORIGIN` is an HTTPS URL. Unlock
+tokens are individually randomized, signed, and expire after 180 days. Five failed
+passcode attempts block that IP for 30 minutes, with an additional global distributed-
+attack limit. All room/game actions are bound to the player's actual socket, packet sizes
+and rates are capped, active in-memory rooms are limited, and the static site sends
+anti-framing, referrer, permissions, and MIME-sniffing security headers.
+
+Render's free static URL is publicly routable, so an unknown visitor can still download
+the lock-screen shell. They cannot open a room, connect a game socket, request TURN
+credentials, or see game state without a valid signed unlock token. `noindex` discourages
+search engines but is not access control; the server-side passcode gate is the boundary.

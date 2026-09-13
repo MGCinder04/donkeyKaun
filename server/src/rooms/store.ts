@@ -12,6 +12,7 @@ const NAME_MAX_LEN = 20;
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no I/O/0/1 — avoids visual ambiguity
 const CODE_LENGTH = 5;
 const DISCONNECT_GRACE_MS = 10 * 60 * 1000; // 10 min: free-tier reconnects can be slow
+const MAX_ACTIVE_ROOMS = 20;
 
 const rooms = new Map<string, Room>();
 
@@ -29,6 +30,15 @@ function sanitizeName(name: unknown): string | null {
   if (typeof name !== "string") return null;
   const trimmed = name.trim().slice(0, NAME_MAX_LEN);
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function isValidDeviceId(deviceId: unknown): deviceId is string {
+  return (
+    typeof deviceId === "string" &&
+    deviceId.length >= 1 &&
+    deviceId.length <= 100 &&
+    /^[A-Za-z0-9-]+$/.test(deviceId)
+  );
 }
 
 function sanitizeAvatar(avatar: unknown): AvatarChoice | null {
@@ -52,7 +62,8 @@ export function createRoom(
 ): RoomResult<Room> {
   const name = sanitizeName(rawName);
   const avatar = sanitizeAvatar(rawAvatar);
-  if (!name || !avatar || !deviceId) return { ok: false, error: "invalid" };
+  if (!name || !avatar || !isValidDeviceId(deviceId)) return { ok: false, error: "invalid" };
+  if (rooms.size >= MAX_ACTIVE_ROOMS) return { ok: false, error: "full" };
 
   const code = generateCode();
   const player: Player = { deviceId, name, avatar, socketId, joinedAt: Date.now(), disconnectedAt: null };
@@ -77,7 +88,9 @@ export function joinRoom(
 ): RoomResult<Room> {
   const name = sanitizeName(rawName);
   const avatar = sanitizeAvatar(rawAvatar);
-  if (typeof rawCode !== "string" || !name || !avatar || !deviceId) return { ok: false, error: "invalid" };
+  if (typeof rawCode !== "string" || !name || !avatar || !isValidDeviceId(deviceId)) {
+    return { ok: false, error: "invalid" };
+  }
 
   const room = findRoom(rawCode);
   if (!room) return { ok: false, error: "not_found" };
@@ -125,11 +138,15 @@ export function startRoom(code: string, deviceId: string): RoomResult<Room> {
   const publicRoom = toPublicRoom(room);
   const host = publicRoom.players.find((p) => p.isHost);
   if (!host || host.deviceId !== deviceId) return { ok: false, error: "not_host" };
-  if (room.players.length < MIN_PLAYERS_TO_START || room.players.length > MAX_PLAYERS) {
+  const connectedPlayers = room.players.filter((player) => player.socketId !== null);
+  if (connectedPlayers.length < MIN_PLAYERS_TO_START || connectedPlayers.length > MAX_PLAYERS) {
     return { ok: false, error: "cant_start" };
   }
+  // A closed tab may leave a reconnecting placeholder in the lobby during its grace
+  // period. Do not carry that abandoned seat into a game that can never progress.
+  room.players = connectedPlayers;
   room.status = "playing";
-  room.game = startGame(room.players.map((p) => p.deviceId));
+  room.game = startGame(connectedPlayers.map((p) => p.deviceId));
   return { ok: true, value: room };
 }
 
