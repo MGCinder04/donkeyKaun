@@ -85,7 +85,7 @@ const strategyCommit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "u
 const artifact = {
   generatedAt: new Date().toISOString(),
   methodology: {
-    description: "Untuned holdout deals; all 24 seat permutations per independent seed",
+    description: "Frozen-strategy holdout deals; exhaustive four-player permutations and balanced five/six-player rotations",
     independentSeeds: HOLDOUT_SEEDS.length,
     seedManifest: HOLDOUT_SEEDS,
     tableSizes: [4, 5, 6],

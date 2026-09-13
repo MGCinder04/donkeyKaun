@@ -186,10 +186,19 @@ Each milestone ends with a checklist below and a demo for live testing before me
 ### M7 — Bots ✅
 - [x] Bot seat creation and host controls
 - [x] Legal-play engine adapter using the existing replacement-seat seam
-- [x] Bidding strategy and progressively stronger play strategies
+- [x] Full-card public-memory ledger (all 52 cards accounted for without revealing
+      hidden hands), known-void inference, circulation/suit-shape/bid-pressure analysis
+- [x] Four genuinely distinct strategies: forgiving Bhola, conservative Hisaabi,
+      targeted saboteur Shaitaan, and rollout-planning Ustaad
 - [x] Solo game against bots and bot takeover for a disconnected player
-- [x] Deterministic bot tests plus difficulty/fairness tuning (bots never inspect cards
-      that a human in the same seat could not see)
+- [x] Deterministic tactical tests and balanced qualification leagues across mixed
+      four/five/six-player rooms plus homogeneous self-play; full results are recorded
+      in `docs/BOT_EVALUATION.md`
+- [x] Difficulty/fairness tuning (bots never inspect cards that a human in the same
+      seat could not see; Ustaad is statistically strongest rather than secretly lucky)
+- [x] Frozen-strategy holdout qualification: 3,200 games over 40 independent deal seeds
+      across 4/5/6-player tables, with raw aggregate/per-seed metrics and seed manifest
+      in `docs/BOT_QUALIFICATION.json`
 
 ## 6. Git workflow (for you to run day-to-day)
 
