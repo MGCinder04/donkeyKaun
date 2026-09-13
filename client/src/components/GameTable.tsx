@@ -4,6 +4,7 @@ import { AvatarThumb } from "./AvatarThumb";
 import { Button } from "./Button";
 import { ScoreSheetModal } from "./ScoreSheetModal";
 import { PlayerAdminModal } from "./PlayerAdminModal";
+import { PrivateAssistControl } from "./PrivateAssistControl";
 import { gameSeatPosition, pileSlotPosition } from "../rooms/gameSeatLayout";
 import { roundSummaryKey, useDealAnimation, useRoundRecap, useTrickAnimation } from "../rooms/gameAnimations";
 import { sortCardsForDisplay } from "../rooms/cardSort";
@@ -38,6 +39,11 @@ interface GameTableProps {
   speakingDeviceIds?: Set<string>;
   mutedVoiceDeviceIds?: Set<string>;
   onToggleVoiceMute?: (deviceId: string) => void;
+  privateAssistUnlocked: boolean;
+  privateAssistEnabled: boolean;
+  privateAssistBusy: boolean;
+  onTogglePrivateAssist: () => void;
+  onEditProfile: () => void;
 }
 
 export function GameTable({
@@ -60,6 +66,11 @@ export function GameTable({
   speakingDeviceIds,
   mutedVoiceDeviceIds,
   onToggleVoiceMute,
+  privateAssistUnlocked,
+  privateAssistEnabled,
+  privateAssistBusy,
+  onTogglePrivateAssist,
+  onEditProfile,
 }: GameTableProps) {
   const [showScoreSheet, setShowScoreSheet] = useState(false);
   const [managePlayerId, setManagePlayerId] = useState<string | null>(null);
@@ -311,13 +322,27 @@ export function GameTable({
                 animate={player && !player.connected ? { opacity: [1, 0.45, 1] } : { opacity: 1 }}
                 transition={player && !player.connected ? { repeat: Infinity, duration: 1.6, ease: "easeInOut" } : undefined}
               >
-                {player && (
+                {player && (isSelf ? (
+                  <button
+                    type="button"
+                    onClick={onEditProfile}
+                    aria-label="Change your name or avatar"
+                    title="Change your name or avatar"
+                    className="block rounded-full transition-transform hover:scale-105"
+                  >
+                    <AvatarThumb
+                      avatar={player.avatar}
+                      size={52}
+                      className={player.connected ? "" : "opacity-40 grayscale"}
+                    />
+                  </button>
+                ) : (
                   <AvatarThumb
                     avatar={player.avatar}
                     size={52}
                     className={player.connected ? "" : "opacity-40 grayscale"}
                   />
-                )}
+                ))}
                 {isTurn && (
                   <span
                     className="absolute inset-0 rounded-full"
@@ -404,10 +429,17 @@ export function GameTable({
         })}
       </div>
 
+      <PrivateAssistControl
+        unlocked={privateAssistUnlocked}
+        enabled={privateAssistEnabled}
+        busy={privateAssistBusy}
+        onToggle={onTogglePrivateAssist}
+      />
+
       {!dealing && game.phase === "bidding" && (
         <p className="mb-4 text-lg" style={{ color: "var(--ink-dim)" }}>
           {isMyBidTurn
-            ? "Your bid — how many hands will you win?"
+            ? privateAssistEnabled ? "Ustaad is choosing your bid…" : "Your bid — how many hands will you win?"
             : bidTurnPlayer?.botKind
               ? `Thinking: ${bidTurnPlayer.name}…`
               : `Waiting for ${nameFor(game.bidTurnDeviceId ?? "")} to bid…`}
@@ -420,7 +452,7 @@ export function GameTable({
             : displayTrick.length === total
               ? "Hand complete…"
               : isMyPlayTurn
-                ? "Your turn — play a card"
+                ? privateAssistEnabled ? "Ustaad is choosing your card…" : "Your turn — play a card"
                 : playTurnPlayer?.botKind
                   ? `Thinking: ${playTurnPlayer.name}…`
                   : `Waiting for ${nameFor(game.turnDeviceId ?? "")}…`}
@@ -433,7 +465,7 @@ export function GameTable({
             <button
               key={n}
               type="button"
-              disabled={n === forbiddenBid}
+              disabled={privateAssistEnabled || n === forbiddenBid}
               onClick={() => onBid(n)}
               title={n === forbiddenBid ? "Not allowed — would make total bids match the cards dealt" : undefined}
               className="h-12 w-12 rounded-full text-lg font-semibold disabled:opacity-30"
@@ -457,7 +489,7 @@ export function GameTable({
           <div className="flex flex-wrap justify-center gap-2">
             {sortedHand.map((card) => {
               const legal = !isMyPlayTurn || legalKeys.has(cardKey(card));
-              const clickable = isMyPlayTurn && legal;
+              const clickable = isMyPlayTurn && legal && !privateAssistEnabled;
               return (
                 <button
                   key={cardKey(card)}

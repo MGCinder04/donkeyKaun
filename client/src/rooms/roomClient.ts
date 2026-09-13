@@ -68,10 +68,22 @@ interface MembershipResultEvent {
   result: Envelope<PublicRoom>;
 }
 
+export interface PrivateAssistStatus {
+  unlocked: boolean;
+  enabled: boolean;
+}
+
 let activeMembership: Membership | null = null;
 let joinInFlight: Promise<Envelope<PublicRoom>> | null = null;
 let rejoinTimer: ReturnType<typeof setTimeout> | null = null;
 const membershipListeners = new Set<(event: MembershipResultEvent) => void>();
+const privateAssistListeners = new Set<(status: PrivateAssistStatus) => void>();
+let privateAssistState: PrivateAssistStatus = { unlocked: false, enabled: false };
+
+function updatePrivateAssistState(status: PrivateAssistStatus): void {
+  privateAssistState = status;
+  for (const listener of privateAssistListeners) listener(status);
+}
 
 function isTransient(error: ClientRoomErrorCode): boolean {
   return error === "network" || error === "timeout";
@@ -120,6 +132,10 @@ getSocket().on("connect", () => {
   void performJoin(activeMembership, true);
 });
 
+getSocket().on("disconnect", () => {
+  updatePrivateAssistState({ unlocked: false, enabled: false });
+});
+
 export async function createRoom(name: string, avatar: AvatarChoice, deviceId: string) {
   const tokens = createInitialMembershipTokens();
   const result = await request<{ code: string }>("room:create", {
@@ -129,6 +145,7 @@ export async function createRoom(name: string, avatar: AvatarChoice, deviceId: s
     resumeToken: tokens.pending,
   });
   if (result.ok) {
+    updatePrivateAssistState({ unlocked: false, enabled: false });
     storeCreatedMembership(result.value.code, tokens.pending);
     activeMembership = { code: result.value.code, name, avatar, deviceId };
   }
@@ -137,6 +154,9 @@ export async function createRoom(name: string, avatar: AvatarChoice, deviceId: s
 
 export async function joinRoom(code: string, name: string, avatar: AvatarChoice, deviceId: string) {
   const membership = { code: code.toUpperCase(), name, avatar, deviceId };
+  if (activeMembership && activeMembership.code !== membership.code) {
+    updatePrivateAssistState({ unlocked: false, enabled: false });
+  }
   activeMembership = membership;
   const result = await performJoin(membership, false);
   if (!result.ok && !isTransient(result.error)) activeMembership = null;
@@ -150,6 +170,46 @@ export function retryActiveMembership(): Promise<Envelope<PublicRoom>> | null {
 export function onMembershipResult(cb: (event: MembershipResultEvent) => void): () => void {
   membershipListeners.add(cb);
   return () => membershipListeners.delete(cb);
+}
+
+export function getPrivateAssistState(): PrivateAssistStatus {
+  return privateAssistState;
+}
+
+export function onPrivateAssistState(cb: (status: PrivateAssistStatus) => void): () => void {
+  privateAssistListeners.add(cb);
+  return () => privateAssistListeners.delete(cb);
+}
+
+export async function unlockPrivateAssist(secret: string): Promise<Envelope<PrivateAssistStatus>> {
+  if (!activeMembership) return { ok: false, error: "unauthorized" };
+  const result = await request<PrivateAssistStatus>("private-assist:unlock", {
+    code: activeMembership.code,
+    deviceId: activeMembership.deviceId,
+    secret,
+  });
+  if (result.ok) updatePrivateAssistState(result.value);
+  return result;
+}
+
+export async function refreshPrivateAssist(
+  code: string,
+  deviceId: string,
+): Promise<Envelope<PrivateAssistStatus>> {
+  const result = await request<PrivateAssistStatus>("private-assist:status", { code, deviceId });
+  if (result.ok) updatePrivateAssistState(result.value);
+  return result;
+}
+
+export async function setPrivateAssist(
+  code: string,
+  deviceId: string,
+  enabled: boolean,
+): Promise<Envelope<PrivateAssistStatus>> {
+  const result = await request<PrivateAssistStatus>("private-assist:set", { code, deviceId, enabled });
+  if (result.ok) updatePrivateAssistState(result.value);
+  else if (result.error === "unauthorized") updatePrivateAssistState({ unlocked: false, enabled: false });
+  return result;
 }
 
 export function startRoom(code: string, deviceId: string) {
@@ -182,6 +242,7 @@ export function removePlayerSeat(code: string, hostDeviceId: string, targetDevic
 
 export function leaveRoom(code: string, deviceId: string, preserveMembership = false) {
   if (activeMembership?.code === code) activeMembership = null;
+  updatePrivateAssistState({ unlocked: false, enabled: false });
   if (!preserveMembership) clearMembershipCredentials(code);
   getSocket().emit("room:leave", { code, deviceId });
 }
@@ -196,6 +257,7 @@ export function onKicked(cb: (code: string) => void): () => void {
   const socket = getSocket();
   const handler = (payload: { code: string }) => {
     if (activeMembership?.code === payload.code) activeMembership = null;
+    updatePrivateAssistState({ unlocked: false, enabled: false });
     clearMembershipCredentials(payload.code);
     cb(payload.code);
   };
@@ -207,6 +269,7 @@ export function onRoomReplaced(cb: (code: string) => void): () => void {
   const socket = getSocket();
   const handler = (payload: { code: string }) => {
     if (activeMembership?.code === payload.code) activeMembership = null;
+    updatePrivateAssistState({ unlocked: false, enabled: false });
     cb(payload.code);
   };
   socket.on("room:replaced", handler);
@@ -217,6 +280,7 @@ export function onRoomExited(cb: (code: string) => void): () => void {
   const socket = getSocket();
   const handler = (payload: { code: string }) => {
     if (activeMembership?.code === payload.code) activeMembership = null;
+    updatePrivateAssistState({ unlocked: false, enabled: false });
     clearMembershipCredentials(payload.code);
     cb(payload.code);
   };

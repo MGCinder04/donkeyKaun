@@ -11,6 +11,7 @@ const managedEnv = [
   "NODE_ENV",
   "SITE_PASSCODE",
   "SESSION_SECRET",
+  "PRIVATE_USTAAD_SECRET",
   "CLIENT_ORIGIN",
   "TURN_ENABLED",
   "CLOUDFLARE_TURN_KEY_ID",
@@ -101,6 +102,14 @@ describe("passcode security", () => {
     expect(() => assertSecureProductionConfig()).toThrow(/SESSION_SECRET/);
 
     process.env.SESSION_SECRET = "a-secure-session-secret-that-is-long-enough";
+    process.env.PRIVATE_USTAAD_SECRET = "too-short";
+    expect(() => assertSecureProductionConfig()).toThrow(/PRIVATE_USTAAD_SECRET/);
+
+    process.env.SITE_PASSCODE = "long-family-passcode-for-testing";
+    process.env.PRIVATE_USTAAD_SECRET = process.env.SITE_PASSCODE;
+    expect(() => assertSecureProductionConfig()).toThrow(/must not match/);
+
+    process.env.PRIVATE_USTAAD_SECRET = "a-separate-private-ustaad-key-that-is-long";
     process.env.CLIENT_ORIGIN = "http://not-secure.example";
     expect(() => assertSecureProductionConfig()).toThrow(/CLIENT_ORIGIN/);
 
