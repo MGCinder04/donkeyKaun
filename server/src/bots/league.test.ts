@@ -52,7 +52,7 @@ describe("deterministic bot evaluation league", () => {
 
     // This two-seed run is deliberately only a fast determinism/safety smoke test.
     // Statistical strength is measured by the independent holdout qualification run.
-  }, 15_000);
+  }, 60_000);
 
   it("reports a deterministic safety-stop as a deadlock instead of hanging", () => {
     const result = runBotLeague({

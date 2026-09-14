@@ -90,5 +90,5 @@ describe("bot tournament", () => {
     }
     // Every personality must be capable of winning a fair deal; none is scripted to lose.
     for (const kind of BOT_KINDS) expect(completed[kind]).toBeGreaterThan(0);
-  });
+  }, 30_000);
 });

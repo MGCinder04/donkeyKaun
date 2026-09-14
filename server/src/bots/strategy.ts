@@ -8,6 +8,8 @@ import {
   type CardKnowledge,
 } from "./knowledge.js";
 import { rolloutBidEstimates, rolloutCardUtilities } from "./rollout.js";
+import { rolloutBidEstimates as advancedBidEstimates } from "./advancedRollout.js";
+import { searchBestCard, type CardSearchOptions } from "./search.js";
 import type { BotKind } from "./types.js";
 
 /** Fair information boundary: own cards plus facts every person at the table has
@@ -192,7 +194,7 @@ function structuralBidBonus(view: BotView): number {
   return bonus;
 }
 
-export function chooseBid(view: BotView): number {
+function chooseBidHeuristic(view: BotView, bholaBlunderRate: number): number {
   const allowed = legalBids(view);
   const knowledge = knowledgeFor(view);
   const guaranteed = guaranteedTrumpCards(view, knowledge).length;
@@ -236,11 +238,16 @@ export function chooseBid(view: BotView): number {
   });
   scored.sort((a, b) => b.score - a.score || Math.abs(a.bid - expected) - Math.abs(b.bid - expected) || a.bid - b.bid);
 
-  if (view.kind === "bhola" && scored.length > 1 && deterministicNoise(view, "bid") < 0.24) {
+  if (view.kind === "bhola" && scored.length > 1 && deterministicNoise(view, "bid") < bholaBlunderRate) {
     const alternative = scored.find((candidate, index) => index > 0 && candidate.bid >= minimumSensible);
     if (alternative) return alternative.bid;
   }
   return scored[0].bid;
+}
+
+/** Frozen pre-search policy retained for paired regression leagues. */
+export function chooseBidBaseline(view: BotView): number {
+  return chooseBidHeuristic(view, 0.24);
 }
 
 function trickWinner(trick: TrickCard[], leadSuit: Suit, trumpSuit: Suit): TrickCard {
@@ -335,7 +342,7 @@ function trumpDrainBonus(card: Card, view: BotView, knowledge: CardKnowledge): n
   return sideWinners > 0 && trumpCount >= 2 ? sideWinners * 3.5 : 0;
 }
 
-export function chooseCard(view: BotView): Card {
+function chooseCardHeuristic(view: BotView, bholaBlunderRate: number): Card {
   const legal = [...view.legalCards];
   if (legal.length === 0) throw new Error("Bot was asked to play without a legal card");
   if (legal.length === 1) return legal[0];
@@ -419,11 +426,91 @@ export function chooseCard(view: BotView): Card {
   });
 
   scored.sort((a, b) => b.score - a.score || a.power - b.power || cardId(a.card).localeCompare(cardId(b.card)));
-  if (view.kind === "bhola" && scored.length > 1 && deterministicNoise(view, "play-choice") < 0.18) {
+  if (view.kind === "bhola" && scored.length > 1 && deterministicNoise(view, "play-choice") < bholaBlunderRate) {
     const alternative = scored.find((candidate, index) => index > 0 && (!exact || candidate.winChance < 0.55));
     if (alternative) return alternative.card;
   }
   return scored[0].card;
+}
+
+/** Frozen pre-search policy retained for paired regression leagues. */
+export function chooseCardBaseline(view: BotView): Card {
+  return chooseCardHeuristic(view, 0.18);
+}
+
+/** Active policies. Advanced search is layered here so the frozen policies above
+ * remain callable on identical deals during qualification. */
+export function chooseBid(view: BotView): number {
+  const baseline = chooseBidBaseline(view);
+  if (view.kind === "bhola") return chooseBidHeuristic(view, 0.08);
+  const allowed = legalBids(view);
+  const knowledge = knowledgeFor(view);
+  const minimumSensible = Math.min(guaranteedTrumpCards(view, knowledge).length, view.cardsThisRound);
+  const samples = view.kind === "ustaad" ? 16 : 12;
+  const estimates = advancedBidEstimates(view, allowed, samples);
+  const baselineEstimate = estimates.get(baseline);
+  if (!baselineEstimate || baselineEstimate.effectiveSamples < Math.max(4, samples * 0.7)) return baseline;
+
+  const trailing = (view.scores[view.botId] ?? 0) === Math.min(...Object.values(view.scores)) && view.round >= 6;
+  const score = (bid: number): number => {
+    const estimate = estimates.get(bid);
+    if (!estimate || estimate.effectiveSamples < Math.max(4, samples * 0.7)) return -Infinity;
+    if (bid < minimumSensible) return -Infinity;
+    let value = estimate.utility + estimate.exactRate * (view.kind === "hisaabi" ? 24 : view.kind === "ustaad" ? 18 : 10);
+    value -= Math.abs(bid - baseline) * (view.kind === "hisaabi" ? 2.5 : 1.25);
+    if (bid === view.cardsThisRound + 1) value -= view.kind === "shaitaan" && trailing ? 3 : 25;
+    if (view.kind === "hisaabi" && bid > baseline) value -= (bid - baseline) * 1.5;
+    if (view.kind === "shaitaan" && trailing) value += bid * 0.7;
+    return value;
+  };
+  const selected = [...allowed].sort(
+    (a, b) => score(b) - score(a) || Math.abs(a - baseline) - Math.abs(b - baseline) || a - b,
+  )[0];
+  if (view.kind === "ustaad" && selected !== baseline) {
+    const estimate = estimates.get(selected);
+    if (
+      !estimate ||
+      estimate.utility < baselineEstimate.utility + 5 ||
+      estimate.exactRate < baselineEstimate.exactRate + 0.12
+    ) {
+      return baseline;
+    }
+  }
+  return selected;
+}
+
+function cardSearchOptions(kind: BotKind): CardSearchOptions | null {
+  if (kind === "bhola") return null;
+  if (kind === "hisaabi") {
+    return { maxNodes: 1_800, maxDeals: 10, maxIterations: 48, endgameHandSize: 2, maxEndgameDeals: 20 };
+  }
+  if (kind === "shaitaan") {
+    return { maxNodes: 2_800, maxDeals: 14, maxIterations: 72, endgameHandSize: 2, maxEndgameDeals: 28 };
+  }
+  return { maxNodes: 5_500, maxDeals: 20, maxIterations: 140, endgameHandSize: 2, maxEndgameDeals: 48 };
+}
+
+export function chooseCard(view: BotView): Card {
+  const options = cardSearchOptions(view.kind);
+  if (!options) return chooseCardHeuristic(view, 0.06);
+  if (view.legalCards.length <= 1) return chooseCardBaseline(view);
+  if (view.hand.length > 2) return chooseCardBaseline(view);
+  const baseline = chooseCardBaseline(view);
+  const result = searchBestCard(view, view.legalCards, options);
+  if (view.kind !== "ustaad" || result.complete) return result.card;
+
+  // A sampled two-card ending may have many more feasible worlds than its cap.
+  // Ustaad changes a proven move only when those samples show a clear advantage.
+  const selected = result.evaluations.find((item) => cardId(item.card) === cardId(result.card));
+  const previous = result.evaluations.find((item) => cardId(item.card) === cardId(baseline));
+  if (
+    selected && previous && selected.weight > 0 && previous.weight > 0 &&
+    selected.utility >= previous.utility + 4 &&
+    selected.exactContractRate >= previous.exactContractRate + 0.1
+  ) {
+    return result.card;
+  }
+  return baseline;
 }
 
 /** Exposed for deterministic diagnostics and tactical regression tests. */
