@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { cardId, type Card } from "../game/cards.js";
 import { startGame, type GameState } from "../game/engine.js";
-import { chooseBid, chooseCard, viewForBot, type BotView } from "./strategy.js";
+import {
+  chooseBid,
+  chooseBidWithoutConfidenceCeiling,
+  chooseCard,
+  viewForBot,
+  type BotView,
+} from "./strategy.js";
 import { BOT_KINDS, type BotKind } from "./types.js";
 
 function c(suit: Card["suit"], rank: Card["rank"]): Card {
@@ -61,6 +67,26 @@ describe("advanced bid safeguards", () => {
     const bid = chooseBid(botView);
     expect(bid).not.toBe(2);
     expect(bid).toBeGreaterThan(2);
+  });
+
+  it("regularizes a statistically overconfident Ustaad bid", () => {
+    const botView = view({
+      hand: [
+        c("S", "A"), c("S", "9"), c("S", "7"), c("S", "5"),
+        c("H", "A"), c("H", "9"), c("C", "K"), c("C", "3"),
+      ],
+      cardsThisRound: 8,
+      dealerDeviceId: "p2",
+      seatOrder: ["p2", "bot"],
+      bids: { p2: null, bot: null },
+      tricksWon: { p2: 0, bot: 0 },
+      handCounts: { p2: 8, bot: 8 },
+      voidSuits: { p2: [], bot: [] },
+      scores: { p2: 0, bot: 0 },
+    });
+
+    expect(chooseBidWithoutConfidenceCeiling(botView)).toBe(7);
+    expect(chooseBid(botView)).toBe(6);
   });
 });
 

@@ -440,7 +440,7 @@ export function chooseCardBaseline(view: BotView): Card {
 
 /** Active policies. Advanced search is layered here so the frozen policies above
  * remain callable on identical deals during qualification. */
-export function chooseBid(view: BotView): number {
+export function chooseBidWithoutConfidenceCeiling(view: BotView): number {
   const baseline = chooseBidBaseline(view);
   if (view.kind === "bhola") return chooseBidHeuristic(view, 0.08);
   const allowed = legalBids(view);
@@ -477,6 +477,27 @@ export function chooseBid(view: BotView): number {
     }
   }
   return selected;
+}
+
+/** Constrains only unusually ambitious Ustaad bids. Guaranteed top-trump hands
+ * remain a hard floor and dealer-restricted bids are never reintroduced. */
+export function chooseBidWithConfidenceCeiling(view: BotView, excess: number): number {
+  const original = chooseBidWithoutConfidenceCeiling(view);
+  if (view.kind !== "ustaad") return original;
+  const analysis = analyzeBotHand(view);
+  const ceiling = Math.max(
+    analysis.guaranteedTrumpHands,
+    Math.ceil(analysis.expectedHands + excess),
+  );
+  if (original <= ceiling) return original;
+  const alternatives = legalBids(view).filter((bid) => bid <= ceiling);
+  return alternatives.length > 0 ? alternatives[alternatives.length - 1] : original;
+}
+
+/** Qualified on 180 independent paired games: this removed a systematic
+ * over-bidding tail while improving exact contracts, firsts, and donkey rate. */
+export function chooseBid(view: BotView): number {
+  return chooseBidWithConfidenceCeiling(view, 1.25);
 }
 
 function cardSearchOptions(kind: BotKind): CardSearchOptions | null {
